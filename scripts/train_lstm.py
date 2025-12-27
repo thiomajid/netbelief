@@ -239,13 +239,13 @@ def main(cfg: DictConfig):
 
     # Create data transforms pipeline
     train_transforms = [
-        grain.Batch(batch_size=args.per_device_train_batch_size, drop_remainder=True),
         DeviceMaskingTransform(mask_prob=args.mask_prob),
+        grain.Batch(batch_size=args.per_device_train_batch_size, drop_remainder=True),
     ]
 
     eval_transforms = [
-        grain.Batch(batch_size=args.per_device_eval_batch_size, drop_remainder=True),
         DeviceMaskingTransform(mask_prob=0.0),  # no masking
+        grain.Batch(batch_size=args.per_device_eval_batch_size, drop_remainder=True),
     ]
 
     train_loader, eval_loader, feature_scaler, target_scaler = create_lstm_dataloaders(

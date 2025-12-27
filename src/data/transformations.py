@@ -26,6 +26,13 @@ class DeviceMaskingTransform(grain.RandomMapTransform):
 
     def random_map(self, element: tuple[np.ndarray, np.ndarray], rng):
         series, targets = element
+
+        if series.ndim == 3:
+            series = np.expand_dims(series, 0)
+
+        if targets.ndim == 3:
+            targets = np.expand_dims(targets, 0)
+
         B, D, M, T = series.shape
 
         # 1 = mask this device, 0 = keep it
