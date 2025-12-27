@@ -187,6 +187,7 @@ def create_lstm_dataloaders(
         sampler=grain.IndexSampler(
             num_records=len(train_source),
             shuffle=True,
+            num_epochs=1,
             seed=seed,
             shard_options=grain.ShardByJaxProcess(drop_remainder=drop_remainder),
         ),
@@ -200,6 +201,7 @@ def create_lstm_dataloaders(
         sampler=grain.IndexSampler(
             num_records=len(train_source),
             shuffle=False,
+            num_epochs=1,
             seed=seed,
             shard_options=grain.ShardByJaxProcess(drop_remainder=drop_remainder),
         ),
