@@ -221,10 +221,12 @@ def main(cfg: DictConfig):
 
     # Load data
     logger.info(f"Loading data from {args.data_hub_id}")
-    data = load_dataset(args.data_hub_id, split=args.data_split, token=args.hub_token)
-    logger.info(f"Loaded data with shape: {data.shape}")
+    hub_data = load_dataset(
+        args.data_hub_id, split=args.data_split, token=args.hub_token
+    )
+    logger.info(f"Loaded data with shape: {hub_data.shape}")
 
-    data = data.select_columns(args.metrics).to_polars()
+    data = hub_data.select_columns(args.metrics).to_polars()
     logger.info(f"Dataset columns are {data.columns}")
 
     data = data.to_numpy()
@@ -240,11 +242,13 @@ def main(cfg: DictConfig):
         grain.Batch(batch_size=args.per_device_eval_batch_size, drop_remainder=True),
     ]
 
+    NUM_DEVICES = len(hub_data.unique("flow_start"))
     train_loader, eval_loader = create_lstm_dataloaders(
         data=data,
         lookback=args.lookback,
         horizon=args.horizon,
         train_fraction=args.train_fraction,
+        num_devices=NUM_DEVICES,
         seed=args.seed,
         worker_count=args.worker_count,
         worker_buffer_size=args.worker_buffer_size,

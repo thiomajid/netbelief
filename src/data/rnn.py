@@ -71,9 +71,19 @@ def create_lstm_dataloaders(
     worker_buffer_size: int,
     logger: LoguruLogger,
     drop_remainder: bool = True,
+    num_devices: tp.Optional[int] = None,
     train_operations: tp.Optional[tp.Sequence[grain.Transformation]] = None,
     eval_operations: tp.Optional[tp.Sequence[grain.Transformation]] = None,
 ):
+    if num_devices is None and data.ndim == 2:
+        raise ValueError(
+            "num_devices must be provided to correctly partition telemetry data"
+        )
+
+    if data.ndim == 2:
+        data = data.reshape(num_devices, -1, data.shape[-1])
+        logger.warning(f"After reshaping, the dataset has shape {data.shape}")
+
     context, target = partition_logs(data, lookback=lookback, horizon=horizon)
     split_index = int(context.shape[0] * train_fraction)
     train_context, train_target = context[:split_index], target[:split_index]
