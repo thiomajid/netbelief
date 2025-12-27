@@ -205,4 +205,4 @@ def create_lstm_dataloaders(
         ),
     )
 
-    return train_loader, val_loader
+    return train_loader, val_loader, feature_scaler, target_scaler

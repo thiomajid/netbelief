@@ -134,6 +134,10 @@ def main(cfg: DictConfig):
     args = parser.parse_dict(OmegaConf.to_container(cfg["trainer"], resolve=True))[0]  # ty: ignore
     args = tp.cast(TrainingConfig, args)
 
+    OUTPUT_DIR = Path(args.output_dir)
+    if not OUTPUT_DIR.exists():
+        OUTPUT_DIR.mkdir(parents=True)
+
     # Create model config from cfg
     log_node_devices_stats(logger)
     dtype = str2dtype(args.dtype)
@@ -243,7 +247,7 @@ def main(cfg: DictConfig):
         grain.Batch(batch_size=args.per_device_eval_batch_size, drop_remainder=True),
     ]
 
-    train_loader, eval_loader = create_lstm_dataloaders(
+    train_loader, eval_loader, feature_scaler, target_scaler = create_lstm_dataloaders(
         data=data,
         lookback=args.lookback,
         horizon=args.horizon,
@@ -255,6 +259,11 @@ def main(cfg: DictConfig):
         train_operations=train_transforms,
         eval_operations=eval_transforms,
     )
+
+    # save scalers for later usage
+    feature_scaler.save(OUTPUT_DIR / "feature_scaler.json")
+    target_scaler.save(OUTPUT_DIR / "target_scaler.json")
+    logger.info(f"Saved scalers params in the output directory at {OUTPUT_DIR}")
 
     # Setup the training loop
     num_train_samples = len(train_loader._data_source)
