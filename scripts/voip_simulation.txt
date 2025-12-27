@@ -1,0 +1,610 @@
+"""
+VoIP Network Simulation with Hydra configuration.
+
+This script simulates VoIP traffic over a Mininet network topology,
+collecting metrics like bandwidth, jitter, packet loss, and RTT.
+"""
+
+import csv
+import importlib
+import math
+import os
+import random
+import re
+import threading
+import time
+import typing as tp
+
+import hydra
+from hydra.core.config_store import ConfigStore
+from loguru import logger
+from mininet.link import TCLink
+from mininet.net import Mininet
+from mininet.node import Node, OVSController, OVSKernelSwitch
+from omegaconf import DictConfig, OmegaConf
+from tqdm import tqdm
+
+from src.simulation_config import VoIPSimulationConfig
+
+# Register the config with Hydra
+cs = ConfigStore.instance()
+cs.store(name="voip_simulation_config", node=VoIPSimulationConfig)
+
+
+def load_topology_class(module_name: str, class_name: str) -> type:
+    """
+    Dynamically load a topology class from the pytopo package.
+
+    Args:
+        module_name: Name of the module in pytopo (e.g., "airtel")
+        class_name: Name of the class to import (e.g., "GeneratedTopo")
+
+    Returns:
+        The topology class
+    """
+    module_path = f"pytopo.{module_name}"
+    try:
+        module = importlib.import_module(module_path)
+        topo_class = getattr(module, class_name)
+        logger.info(f"Loaded topology class '{class_name}' from '{module_path}'")
+        return topo_class
+    except ModuleNotFoundError as e:
+        raise ImportError(f"Could not find module '{module_path}': {e}")
+    except AttributeError as e:
+        raise ImportError(
+            f"Could not find class '{class_name}' in module '{module_path}': {e}"
+        )
+
+
+def ensure_dir(directory: str) -> None:
+    """Create directory if it doesn't exist."""
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+
+def parse_iperf_udp_line(
+    line: str,
+    flow_id: str,
+    start_time: float,
+) -> tp.Optional[tp.Dict[str, tp.Any]]:
+    """
+    Parse an iperf UDP output line.
+
+    Example line:
+    [  3]  0.0- 1.0 sec  12.9 KBytes   106 Kbits/sec  0.034 ms    0/    9 (0%)
+    """
+    pattern = (
+        r"\[\s*\d+\]\s*(\d+\.\d+)-\s*(\d+\.\d+)\s*sec\s*"
+        r"(\d+(\.\d+)?)\s*([KMG]Bytes)\s*"
+        r"(\d+(\.\d+)?)\s*([KMG]bits/sec)\s*"
+        r"(\d+(\.\d+)?)\s*ms\s*"
+        r"(\d+)/\s*(\d+)\s*\((\d+(\.\d+)?)%\)"
+    )
+    match = re.search(pattern, line)
+    if match:
+        return {
+            "timestamp": start_time + float(match.group(2)),
+            "flow_id": flow_id,
+            "interval_start": float(match.group(1)),
+            "interval_end": float(match.group(2)),
+            "bandwidth_bps": convert_to_bps(float(match.group(6)), match.group(8)),
+            "jitter_ms": float(match.group(9)),
+            "packet_loss_cnt": int(match.group(11)),
+            "total_packets": int(match.group(12)),
+            "packet_loss_percent": float(match.group(13)),
+        }
+    return None
+
+
+def convert_to_bps(value: float, unit: str) -> float:
+    """Convert bandwidth value to bits per second."""
+    if "Kbits" in unit:
+        return value * 1000
+    elif "Mbits" in unit:
+        return value * 1_000_000
+    elif "Gbits" in unit:
+        return value * 1_000_000_000
+    return value
+
+
+def parse_ping_line(
+    line: str,
+    flow_id: str,
+    start_time_ref: tp.Optional[float],
+) -> tp.Optional[tp.Dict[str, tp.Any]]:
+    """
+    Parse a ping output line.
+
+    Example: [1632123456.789012] 64 bytes from 10.0.0.2: icmp_seq=1 ttl=64 time=0.045 ms
+    """
+    pattern = r"\[(\d+\.\d+)\] .* time=(\d+\.\d+) ms"
+    match = re.search(pattern, line)
+    if match:
+        ts = float(match.group(1))
+        rel_time = ts - start_time_ref if start_time_ref else ts
+        return {
+            "timestamp": rel_time,
+            "abs_timestamp": ts,
+            "flow_id": flow_id,
+            "rtt_ms": float(match.group(2)),
+        }
+    return None
+
+
+def calculate_mos(latency_ms: float, packet_loss_percent: float) -> float:
+    """
+    Calculate Mean Opinion Score (MOS) using E-model approximation.
+
+    Args:
+        latency_ms: One-way delay in milliseconds
+        packet_loss_percent: Packet loss percentage
+
+    Returns:
+        MOS score between 1 and 5
+    """
+    d = latency_ms
+
+    # Id (Delay impairment)
+    if d < 177.3:
+        Id = 0.024 * d
+    else:
+        Id = 0.024 * d + 0.11 * (d - 177.3)
+
+    # Ie (Packet loss impairment)
+    p = packet_loss_percent / 100.0
+    Ie = 30 * math.log(1 + 15 * p) if p > 0 else 0
+
+    # R factor
+    R = max(0, min(100, 93.2 - Id - Ie))
+
+    # MOS mapping
+    MOS = 1 + 0.035 * R + R * (R - 60) * (100 - R) * 7e-6
+    return max(1, min(5, MOS))
+
+
+def collect_switch_stats(
+    net: Mininet,
+    stop_event: threading.Event,
+    interval: float,
+    output_dir: str,
+) -> None:
+    """Collect switch statistics in a background thread."""
+    logger.info("Starting switch stats collection...")
+    while not stop_event.is_set():
+        timestamp = time.time()
+        for sw in net.switches:
+            try:
+                out = sw.cmd(f"ovs-ofctl dump-ports {sw.name}")
+                with open(f"{output_dir}/switch_stats_{sw.name}.log", "a") as f:
+                    f.write(f"TIMESTAMP:{timestamp}\n")
+                    f.write(out)
+                    f.write("END_SNAPSHOT\n")
+            except Exception as e:
+                logger.error(f"Error collecting stats for {sw.name}: {e}")
+
+        if stop_event.wait(interval):
+            break
+
+
+def parse_switch_stats(output_dir: str) -> tp.List[tp.Dict[str, tp.Any]]:
+    """Parse switch statistics log files."""
+    stats_data = []
+
+    port_pattern_rx = (
+        r"port\s+(\S+):.*rx pkts=(\d+), bytes=(\d+), drop=(\d+), errs=(\d+)"
+    )
+    port_pattern_tx = r"tx pkts=(\d+), bytes=(\d+), drop=(\d+), errs=(\d+)"
+
+    for filename in os.listdir(output_dir):
+        if filename.startswith("switch_stats_") and filename.endswith(".log"):
+            switch_name = filename.replace("switch_stats_", "").replace(".log", "")
+            filepath = os.path.join(output_dir, filename)
+
+            with open(filepath, "r") as f:
+                content = f.read()
+
+            snapshots = content.split("END_SNAPSHOT\n")
+            for snap in snapshots:
+                if not snap.strip():
+                    continue
+
+                lines = snap.split("\n")
+                timestamp = 0.0
+                if lines[0].startswith("TIMESTAMP:"):
+                    timestamp = float(lines[0].split(":")[1])
+
+                current_port = None
+                rx_data = None
+
+                for line in lines:
+                    rx_match = re.search(port_pattern_rx, line)
+                    if rx_match:
+                        current_port = rx_match.group(1)
+                        rx_data = {
+                            "rx_pkts": int(rx_match.group(2)),
+                            "rx_bytes": int(rx_match.group(3)),
+                            "rx_drop": int(rx_match.group(4)),
+                            "rx_errs": int(rx_match.group(5)),
+                        }
+                        continue
+
+                    if current_port and rx_data:
+                        tx_match = re.search(port_pattern_tx, line)
+                        if tx_match:
+                            stat_entry = {
+                                "timestamp": timestamp,
+                                "switch": switch_name,
+                                "port": current_port,
+                                **rx_data,
+                                "tx_pkts": int(tx_match.group(1)),
+                                "tx_bytes": int(tx_match.group(2)),
+                                "tx_drop": int(tx_match.group(3)),
+                                "tx_errs": int(tx_match.group(4)),
+                            }
+                            stats_data.append(stat_entry)
+                            current_port = None
+                            rx_data = None
+
+    return stats_data
+
+
+def run_simulation(cfg: VoIPSimulationConfig) -> None:
+    """
+    Run the VoIP network simulation.
+
+    Args:
+        cfg: Simulation configuration
+    """
+    output_dir = cfg.simulation.output_dir
+    ensure_dir(output_dir)
+
+    # Set random seed if specified
+    if cfg.simulation.seed is not None:
+        random.seed(cfg.simulation.seed)
+        logger.info(f"Random seed set to: {cfg.simulation.seed}")
+
+    logger.info(f"Starting VoIP Simulation (Duration: {cfg.simulation.duration}s)")
+
+    # Load topology dynamically
+    TopoClass = load_topology_class(
+        cfg.topology.module_name,
+        cfg.topology.class_name,
+    )
+
+    # Initialize network
+    topo = TopoClass()
+    net = Mininet(
+        topo=topo,
+        controller=OVSController,
+        link=TCLink,
+        switch=OVSKernelSwitch,
+    )
+    try:
+        net.start()
+
+        # Enable STP on all switches
+        logger.info("Enabling STP on switches")
+        for sw in net.switches:
+            sw.cmd(f"ovs-vsctl set bridge {sw.name} stp_enable=true")
+
+        logger.info("Waiting for switch connections")
+        net.waitConnected(timeout=cfg.simulation.stp_convergence_time)
+
+        # Wait for STP convergence
+        logger.info(
+            f"Waiting for STP convergence ({cfg.simulation.stp_convergence_time}s)..."
+        )
+        time.sleep(cfg.simulation.stp_convergence_time)
+
+        hosts = net.hosts
+        if len(hosts) < 2:
+            logger.error("Not enough hosts for simulation")
+            net.stop()
+            return
+
+        # Setup VoIP traffic pairs
+        available_hosts = list(hosts)
+        random.shuffle(available_hosts)
+
+        num_hosts = len(available_hosts)
+        foreground_flow_count = max(
+            cfg.traffic.voip_flow_count,
+            num_hosts // 2,
+        )
+
+        pairs = []
+        for _ in range(foreground_flow_count):
+            if len(available_hosts) >= 2:
+                h1 = available_hosts.pop()
+                h2 = available_hosts.pop()
+                pairs.append((h1, h2))
+
+        logger.info(f"Setting up {len(pairs)} VoIP pairs")
+
+        # Start switch stats collection
+        stop_event = threading.Event()
+        stats_thread = threading.Thread(
+            target=collect_switch_stats,
+            args=(net, stop_event, cfg.simulation.polling_interval, output_dir),
+        )
+        stats_thread.start()
+
+        # Start iperf servers
+        servers = []
+        for h1, h2 in pairs:
+            servers.append(
+                h1.popen(
+                    f"iperf -s -u -i 1 > {output_dir}/iperf_server_{h1.name}.log",
+                    shell=True,
+                )
+            )
+            servers.append(
+                h2.popen(
+                    f"iperf -s -u -i 1 > {output_dir}/iperf_server_{h2.name}.log",
+                    shell=True,
+                )
+            )
+
+        # Setup background traffic
+        bg_hosts = random.sample(
+            hosts,
+            min(len(hosts), cfg.traffic.background_traffic_count * 2),
+        )
+        bg_pairs = []
+        for i in range(0, len(bg_hosts) - 1, 2):
+            s = bg_hosts[i]
+            c = bg_hosts[i + 1]
+            bg_pairs.append((s, c))
+            servers.append(
+                s.popen(
+                    f"iperf -s -i 1 > {output_dir}/iperf_bg_server_{s.name}.log",
+                    shell=True,
+                )
+            )
+
+        logger.info("Starting traffic generation")
+        time.sleep(2)  # Wait for servers to start
+
+        # Start VoIP clients (bidirectional)
+        clients = []
+        pings = []
+        duration = cfg.simulation.duration
+        voip_bw = cfg.traffic.voip_bandwidth
+
+        for h1, h2 in pairs:
+            # h1 -> h2
+            clients.append(
+                h1.popen(
+                    f"iperf -c {h2.IP()} -u -b {voip_bw} -t {duration} -i 1 "
+                    f"> {output_dir}/iperf_client_{h1.name}_to_{h2.name}.log",
+                    shell=True,
+                )
+            )
+            pings.append(
+                h1.popen(
+                    f"ping {h2.IP()} -i 1 -D -c {duration} "
+                    f"> {output_dir}/ping_{h1.name}_to_{h2.name}.log",
+                    shell=True,
+                )
+            )
+
+            # h2 -> h1
+            clients.append(
+                h2.popen(
+                    f"iperf -c {h1.IP()} -u -b {voip_bw} -t {duration} -i 1 "
+                    f"> {output_dir}/iperf_client_{h2.name}_to_{h1.name}.log",
+                    shell=True,
+                )
+            )
+            pings.append(
+                h2.popen(
+                    f"ping {h1.IP()} -i 1 -D -c {duration} "
+                    f"> {output_dir}/ping_{h2.name}_to_{h1.name}.log",
+                    shell=True,
+                )
+            )
+
+        # Start background traffic
+        for s, c in bg_pairs:
+            clients.append(
+                c.popen(
+                    f"iperf -c {s.IP()} -t {duration} -i 1 "
+                    f"> {output_dir}/iperf_bg_client_{c.name}_to_{s.name}.log",
+                    shell=True,
+                )
+            )
+
+        logger.info(f"Running simulation for {duration} seconds...")
+
+        for _ in tqdm(range(duration), desc="Simulation Progress", unit="s"):
+            time.sleep(1)
+
+        logger.info("Simulation finished. Stopping network.")
+
+        # Cleanup
+        stop_event.set()
+        stats_thread.join()
+
+        os.system("pkill -9 iperf")
+        for p in pings:
+            p.terminate()
+
+    finally:
+        net.stop()
+        os.system("mn -c")
+
+    logger.info("Processing logs...")
+    process_logs(pairs, output_dir)
+
+
+def process_logs(
+    voip_pairs: tp.List[tp.Tuple[Node, Node]],
+    output_dir: str,
+) -> None:
+    """Process simulation logs and generate CSV output."""
+    logger.info("Processing logs and merging data...")
+
+    # Process switch stats
+    switch_stats_raw = parse_switch_stats(output_dir)
+    switch_deltas = {}
+
+    if switch_stats_raw:
+        timestamps = sorted(list(set(d["timestamp"] for d in switch_stats_raw)))
+        if timestamps:
+            start_time_ref = timestamps[0]
+
+            grouped_by_ts = {t: [] for t in timestamps}
+            for entry in switch_stats_raw:
+                grouped_by_ts[entry["timestamp"]].append(entry)
+
+            aggregates = {}
+            for t in timestamps:
+                agg = {
+                    "net_rx_pkts": 0,
+                    "net_rx_bytes": 0,
+                    "net_rx_drop": 0,
+                    "net_rx_errs": 0,
+                    "net_tx_pkts": 0,
+                    "net_tx_bytes": 0,
+                    "net_tx_drop": 0,
+                    "net_tx_errs": 0,
+                }
+                for entry in grouped_by_ts[t]:
+                    agg["net_rx_pkts"] += entry["rx_pkts"]
+                    agg["net_rx_bytes"] += entry["rx_bytes"]
+                    agg["net_rx_drop"] += entry["rx_drop"]
+                    agg["net_rx_errs"] += entry["rx_errs"]
+                    agg["net_tx_pkts"] += entry["tx_pkts"]
+                    agg["net_tx_bytes"] += entry["tx_bytes"]
+                    agg["net_tx_drop"] += entry["tx_drop"]
+                    agg["net_tx_errs"] += entry["tx_errs"]
+                aggregates[t] = agg
+
+            for i in range(1, len(timestamps)):
+                t_curr = timestamps[i]
+                t_prev = timestamps[i - 1]
+
+                curr = aggregates[t_curr]
+                prev = aggregates[t_prev]
+
+                delta = {}
+                for k in curr.keys():
+                    d = curr[k] - prev[k]
+                    delta[k] = d if d >= 0 else 0
+
+                rel_time = int(round(t_curr - start_time_ref))
+                switch_deltas[rel_time] = delta
+
+    # Process ping logs
+    ping_data = {}
+
+    for h1, h2 in voip_pairs:
+        for src, dst in [(h1, h2), (h2, h1)]:
+            flow_id = f"{src.name}->{dst.name}"
+            log_path = os.path.join(output_dir, f"ping_{src.name}_to_{dst.name}.log")
+
+            if os.path.exists(log_path):
+                with open(log_path, "r") as f:
+                    lines = f.readlines()
+
+                start_ref = None
+                for line in lines:
+                    match = re.search(r"\[(\d+\.\d+)\]", line)
+                    if match:
+                        start_ref = float(match.group(1))
+                        break
+
+                if start_ref:
+                    ping_data[flow_id] = []
+                    for line in lines:
+                        parsed = parse_ping_line(line, flow_id, start_ref)
+                        if parsed:
+                            ping_data[flow_id].append(parsed)
+
+    # Process iperf logs and merge data
+    csv_file = os.path.join(output_dir, "voip_simulation_data.csv")
+    data_points = []
+
+    empty_switch_stats = {
+        "net_rx_pkts": 0,
+        "net_rx_bytes": 0,
+        "net_rx_drop": 0,
+        "net_rx_errs": 0,
+        "net_tx_pkts": 0,
+        "net_tx_bytes": 0,
+        "net_tx_drop": 0,
+        "net_tx_errs": 0,
+    }
+
+    def process_flow(server: Node, client: Node, flow_id: str) -> None:
+        log_path = os.path.join(output_dir, f"iperf_server_{server.name}.log")
+        if os.path.exists(log_path):
+            with open(log_path, "r") as f:
+                content = f.read()
+                lines = content.split("\n")
+                for line in lines:
+                    parsed = parse_iperf_udp_line(line, flow_id, 0)
+                    if parsed:
+                        # Merge RTT
+                        rtt = 0.0
+                        if flow_id in ping_data and ping_data[flow_id]:
+                            closest = min(
+                                ping_data[flow_id],
+                                key=lambda x: abs(x["timestamp"] - parsed["timestamp"]),
+                            )
+                            if abs(closest["timestamp"] - parsed["timestamp"]) < 2.0:
+                                rtt = closest["rtt_ms"]
+
+                        parsed["rtt_ms"] = rtt
+                        parsed["mos"] = calculate_mos(
+                            rtt, parsed["packet_loss_percent"]
+                        )
+
+                        # Merge switch stats
+                        rel_sec = int(round(parsed["timestamp"]))
+                        s_stats = switch_deltas.get(rel_sec, empty_switch_stats)
+                        parsed.update(s_stats)
+
+                        data_points.append(parsed)
+
+    for h1, h2 in voip_pairs:
+        process_flow(h1, h2, f"{h2.name}->{h1.name}")
+        process_flow(h2, h1, f"{h1.name}->{h2.name}")
+
+    if data_points:
+        keys = data_points[0].keys()
+        with open(csv_file, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=keys)
+            writer.writeheader()
+            writer.writerows(data_points)
+        logger.info(f"Combined data saved to {csv_file}")
+    else:
+        logger.warning("No data collected. Check logs in dumps/ folder.")
+
+
+@hydra.main(
+    version_base="1.2",
+    config_path="../config",
+    config_name="simulation",
+)
+def main(cfg: DictConfig) -> None:
+    """Main entry point with Hydra configuration."""
+    # Convert OmegaConf to the dataclass
+    schema = OmegaConf.structured(VoIPSimulationConfig)
+    cfg = OmegaConf.merge(schema, cfg)
+
+    logger.info("Configuration:")
+    logger.info(OmegaConf.to_yaml(cfg))
+
+    # Convert to dataclass for type safety
+    config = VoIPSimulationConfig(
+        topology=cfg.topology,
+        traffic=cfg.traffic,
+        simulation=cfg.simulation,
+    )
+
+    run_simulation(config)
+
+
+if __name__ == "__main__":
+    main()

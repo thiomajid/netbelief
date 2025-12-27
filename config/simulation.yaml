@@ -1,0 +1,126 @@
+# Topology configuration
+topology:
+  # Module name in the pytopo package (e.g., "airtel" for pytopo/airtel.py)
+  module_name: airtel
+  # Class name to import from the module
+  class_name: GeneratedTopo
+
+# Traffic generation configuration
+traffic:
+  # Bandwidth for VoIP traffic (approx G.711 + overhead)
+  voip_bandwidth: "100k"
+  # Number of VoIP flow pairs to simulate
+  voip_flow_count: 5
+  # Number of background TCP flows for realistic network conditions
+  background_traffic_count: 8
+
+# Simulation parameters
+simulation:
+  # Total simulation duration in seconds
+  duration: 3_600
+  # Interval for data collection/polling in seconds (affects switch stats, iperf, ping)
+  polling_interval: 0.2
+  # Output directory for logs and collected data
+  output_dir: dumps
+  # STP convergence wait time in seconds
+  stp_convergence_time: 15
+  # Random seed for reproducibility (null for random behavior)
+  seed: 729
+  # Link capacity in bits per second (used for utilization calculation)
+  link_capacity_bps: 10000000 # 10 Mbps default
+
+# Network variability configuration
+# Introduces controlled randomness for realistic time series data.
+# Configure intervals and probabilities to balance realism with data tractability.
+variability:
+  # Master switch for all variability features
+  enabled: false
+  # Random seed for reproducibility (null for random)
+  seed: null
+  # Link scope determines which links are affected by variability:
+  #   "all"      - Both backbone (switch-switch) and access (switch-host) links
+  #   "backbone" - Only switch-to-switch links (core network infrastructure)
+  #   "access"   - Only switch-to-host links (last-mile/endpoint connections)
+  link_scope: "all"
+  # Links to exclude from variability (list of [node1, node2] pairs)
+  # Example: [["s0", "s7"], ["s7", "s8"]]
+  excluded_links: []
+  # Specific links to target (empty = use link_scope to determine)
+  target_links: []
+
+  # Default values for links without QoS parameters (e.g., access links without explicit bw/delay)
+  # Set to null to skip variability events on links without original values
+  default_bandwidth: 10.0 # Mbps - used for links without explicit bandwidth
+  default_delay: "1ms" # Latency - used for links without explicit delay
+
+  # Link failure simulation (complete link outage)
+  link_failure:
+    enabled: false
+    # Probability of failure occurring during each check
+    probability: 0.05
+    # Time range between failure checks (seconds)
+    min_interval: 60.0
+    max_interval: 300.0
+    # Duration range for failures before automatic recovery (seconds)
+    min_duration: 10.0
+    max_duration: 60.0
+    # Maximum fraction of links that can fail simultaneously
+    max_concurrent_failures: 0.1
+
+  # Delay variation (simulates routing changes, congestion effects)
+  delay_variation:
+    enabled: false
+    # Probability of delay change occurring during each check
+    probability: 0.1
+    # Time range between checks (seconds)
+    min_interval: 30.0
+    max_interval: 120.0
+    # Delay multiplier range (1.0 = original delay)
+    min_multiplier: 0.8
+    max_multiplier: 2.0
+    # Time before delay reverts to original (null = no auto-revert)
+    revert_after: null
+
+  # Bandwidth variation (simulates capacity fluctuations)
+  bandwidth_variation:
+    enabled: false
+    # Probability of bandwidth change occurring during each check
+    probability: 0.1
+    # Time range between checks (seconds)
+    min_interval: 30.0
+    max_interval: 120.0
+    # Bandwidth as fraction of original (0.3 = 30% of original)
+    min_fraction: 0.3
+    max_fraction: 1.0
+    # Time before bandwidth reverts to original (null = no auto-revert)
+    revert_after: null
+
+  # Packet loss variation (simulates link quality degradation)
+  packet_loss:
+    enabled: false
+    # Probability of loss change occurring during each check
+    probability: 0.08
+    # Time range between checks (seconds)
+    min_interval: 45.0
+    max_interval: 180.0
+    # Packet loss percentage range
+    min_loss: 0.0
+    max_loss: 5.0
+    # Time before loss reverts to zero (null = no auto-revert)
+    revert_after: null
+
+  # Congestion simulation (combined bandwidth/delay/loss effects)
+  congestion:
+    enabled: false
+    # Probability of congestion occurring during each check
+    probability: 0.05
+    # Time range between checks (seconds)
+    min_interval: 120.0
+    max_interval: 600.0
+    # Duration range for congestion events (seconds)
+    min_duration: 30.0
+    max_duration: 180.0
+    # Congestion effects
+    bandwidth_reduction: 0.4 # Fraction of original bandwidth during congestion
+    additional_delay_ms: 50.0 # Additional delay in milliseconds
+    loss_percent: 2.0 # Packet loss percentage during congestion

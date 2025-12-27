@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+*/**.vmdk
+*/**.qcow2
+
+dumps/
+topologies/
+assessing-mininet/
+notebooks/catboost_info/
+notebooks/hub.ipynb
+notebooks/train_*.ipynb
+
+# hydra-outputs
+outputs/

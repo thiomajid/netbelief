@@ -1,0 +1,444 @@
+import json
+import shutil
+import typing as tp
+from dataclasses import asdict
+from pathlib import Path
+from time import perf_counter
+
+import chex
+import grain.python as grain
+import jax
+import jax.numpy as jnp
+import optax
+from flax import nnx
+from jax.sharding import Mesh, NamedSharding
+from loguru import Logger
+from tqdm.auto import tqdm
+
+from src.training.module import count_parameters
+from training.arguments import TrainingConfig, TrainingSteps
+from training.callback import Callback
+from training.state import TrainerState
+from training.tensorboard import TensorBoardLogger
+
+_Batch = tuple[jax.Array, jax.Array]  # input_ids and labels
+
+_TrainStepFn = tp.Callable[
+    [nnx.Module, _Batch, jax.Array, nnx.Optimizer, nnx.MultiMetric],
+    tuple[jax.Array, chex.ArrayTree, jax.Array],
+]
+
+_EvalStepFn = tp.Callable[[nnx.Module, _Batch, jax.Array, nnx.MultiMetric], jax.Array]
+
+
+class Trainer:
+    def __init__(
+        self,
+        model: nnx.Module,
+        model_config: tp.Any,
+        args: TrainingConfig,
+        optimizer: nnx.Optimizer,
+        lr_scheduler: optax.Schedule,
+        mesh: Mesh,
+        train_step_fn: _TrainStepFn,
+        eval_step_fn: _EvalStepFn,
+        data_sharding: NamedSharding,
+        train_dataloader: grain.DataLoader,
+        eval_dataloader: grain.DataLoader,
+        train_metrics: nnx.Metric,
+        eval_metrics: nnx.Metric,
+        reporter: TensorBoardLogger,
+        logger: Logger,
+        steps_config: TrainingSteps,
+        callbacks: tp.Optional[tuple[Callback]] = None,
+    ):
+        self.model = model
+        self.model_config = model_config
+        self.args = args
+        self.train_dataloader = train_dataloader
+        self.eval_dataloader = eval_dataloader
+        self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
+        self.mesh = mesh
+        self.data_sharding = data_sharding
+        self.train_metrics = train_metrics
+        self.eval_metrics = eval_metrics
+        self.reporter = reporter
+        self.logger = logger
+        self.steps_config = steps_config
+
+        self.state = TrainerState()
+        self._train_step_fn: _TrainStepFn = train_step_fn
+        self._eval_step_fn: _EvalStepFn = eval_step_fn
+        self.callbacks = tuple(callbacks) if callbacks is not None else None
+
+    def on_train_start(self):
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback.on_train_start()
+
+    def on_epoch_start(self):
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback.on_epoch_start()
+
+    def on_epoch_end(self):
+        self.state.epoch += 1
+        metrics = self.eval_metrics.compute()
+
+        candidate_best_metric = metrics[self.args.best_metric_key]
+        if candidate_best_metric < self.state.best_metric_value:
+            self.state.best_metric_value = candidate_best_metric
+            self.state.best_checkpoint_step = self.state.current_step
+
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback.on_epoch_end(self.state, metrics)
+
+    def train(self):
+        labels_dtype = jnp.int32
+        epoch_durations = []
+
+        self.on_train_start()  #! Callback hook
+        training_start_time = perf_counter()
+
+        for epoch in range(self.args.num_epochs):
+            self.logger.info(f"Starting Epoch {epoch + 1}/{self.args.num_epochs}")
+            self.train_metrics.reset()
+
+            self.on_epoch_start()  #! Callback hook
+            epoch_start_time = perf_counter()
+            epoch_desc = f"Epoch {epoch + 1}/{self.args.num_epochs}"
+
+            train_pbar = tqdm(
+                self.train_dataloader,
+                total=self.steps_config.steps_per_epoch,
+                desc=epoch_desc,
+                leave=True,
+            )
+
+            metrics_postfix_data = {}
+            train_pbar.set_description(epoch_desc)
+            self.model.train()
+
+            for batch in train_pbar:
+                self.state.current_step += 1  # Count every batch as a step
+                input_ids = jnp.array(batch["input_ids"])
+                attention_mask = jnp.array(batch["attention_mask"])
+                labels = jnp.array(batch["labels"], dtype=labels_dtype)
+
+                # Grain may add an additional batch dim
+                if input_ids.shape[0] == 1:
+                    input_ids = input_ids.squeeze(0)
+
+                if attention_mask.shape[0] == 1:
+                    attention_mask = attention_mask.squeeze(0)
+
+                if labels.shape[0] == 1:
+                    labels = labels.squeeze(0)
+
+                # Data placement
+                input_ids = jax.device_put(input_ids, self.data_sharding)
+                attention_mask = jax.device_put(attention_mask, self.data_sharding)
+                labels = jax.device_put(labels, self.data_sharding)
+                step_batch = (input_ids, labels)
+
+                loss, grads, grad_norm = self._train_step_fn(
+                    self.model,
+                    step_batch,
+                    attention_mask,
+                    self.optimizer,
+                    self.train_metrics,
+                )
+
+                postfix_data = {}
+
+                # Logging
+                if self.state.current_step % self.args.logging_steps == 0:
+                    computed_metrics = self.train_metrics.compute()
+                    metrics_to_log = {
+                        f"train/{k}": v for k, v in computed_metrics.items()
+                    }
+
+                    self.reporter.log_scalars(
+                        metrics_to_log,
+                        step=self.state.current_step,
+                    )
+
+                    self.train_metrics.reset()
+
+                    # Update metrics for progress bar display
+                    for metric, value in computed_metrics.items():
+                        metrics_postfix_data[metric] = f"{value:.6f}"
+
+                    metrics_postfix_data.update(
+                        loss=f"{loss.item():.6f}",
+                        grad_norm=f"{grad_norm.item():.4f}",
+                    )
+
+                # Check if it's time for optimizer step
+                is_update_step = (
+                    self.state.current_step % self.args.gradient_accumulation_steps == 0
+                )
+
+                if is_update_step:
+                    self.state.optimizer_step += 1
+
+                    # Log learning rate
+                    current_lr = self.lr_scheduler(self.state.optimizer_step)
+                    self.reporter.log_learning_rate(
+                        current_lr, self.state.optimizer_step
+                    )
+
+                    postfix_data["lr"] = f"{current_lr:.2e}"
+
+                # Update progress bar with all available metrics
+                postfix_data.update(metrics_postfix_data)
+                train_pbar.set_postfix(postfix_data)
+
+                current_desc = f"Epoch {epoch + 1}/{self.args.num_epochs} (Step {self.state.current_step}/{self.steps_config.max_steps}, Opt {self.state.optimizer_step}/{self.steps_config.max_optimizer_steps})"
+                train_pbar.set_description(current_desc)
+
+            #! Evaluation after each epoch
+            self.logger.info(f"Starting evaluation after epoch {epoch + 1}...")
+            self.eval_metrics.reset()
+            eval_batch_count = 0
+
+            self.model.eval()
+            eval_start_time = perf_counter()
+            eval_pbar = tqdm(
+                self.eval_dataloader,
+                desc=f"Evaluating Epoch {epoch + 1}",
+                leave=False,
+            )
+
+            for batch in eval_pbar:
+                eval_batch_count += 1
+                input_ids = jnp.array(batch["input_ids"])
+                attention_mask = jnp.array(batch["attention_mask"])
+                labels = jnp.array(batch["labels"], dtype=labels_dtype)
+
+                # Grain may add an additional batch dim
+                if input_ids.shape[0] == 1:
+                    input_ids = input_ids.squeeze(0)
+
+                if attention_mask.shape[0] == 1:
+                    attention_mask = attention_mask.squeeze(0)
+
+                if labels.shape[0] == 1:
+                    labels = labels.squeeze(0)
+
+                # Data placement
+                input_ids = jax.device_put(input_ids, self.data_sharding)
+                attention_mask = jax.device_put(attention_mask, self.data_sharding)
+                labels = jax.device_put(labels, self.data_sharding)
+
+                step_batch = (input_ids, labels)
+                self._eval_step_fn(
+                    self.model,
+                    step_batch,
+                    attention_mask,
+                    self.eval_metrics,
+                )
+
+                self.logger.info(f"Processed {eval_batch_count} evaluation batches")
+                eval_end_time = perf_counter()
+                eval_duration = eval_end_time - eval_start_time
+
+                self.reporter.log_scalar(
+                    "timing/eval_duration",
+                    eval_duration,
+                    self.state.current_step,
+                )
+
+                self.logger.info(f"Evaluation completed in {eval_duration:.2f} seconds")
+
+            # Record epoch duration and log to TensorBoard
+            epoch_end_time = perf_counter()
+            epoch_duration = epoch_end_time - epoch_start_time
+            epoch_durations.append(epoch_duration)
+            self.reporter.log_scalar(
+                "timing/epoch_duration", epoch_duration, self.state.current_step
+            )
+
+            self.logger.info(
+                f"Epoch {epoch + 1} completed in {epoch_duration:.2f} seconds"
+            )
+
+            computed_eval_metrics = self.eval_metrics.compute()
+            metrics_to_log = {f"eval/{k}": v for k, v in computed_eval_metrics.items()}
+
+            self.reporter.log_scalars(
+                metrics_to_log,
+                step=self.state.current_step,
+            )
+
+            self.logger.info(
+                f"Epoch {epoch + 1} Evaluation Results: {computed_eval_metrics}"
+            )
+
+            self.on_epoch_end()  #! callback hook
+
+        training_end_time = perf_counter()
+        self.logger.info("Training completed")
+
+        self.on_train_end(  #! callback hook
+            epoch_durations=epoch_durations,
+            training_start_time=training_start_time,
+            training_end_time=training_end_time,
+        )
+
+    def on_train_end(
+        self,
+        training_start_time: float,
+        training_end_time: float,
+        epoch_durations: list[float],
+    ):
+        total_training_duration = training_end_time - training_start_time
+        self.reporter.log_scalar(
+            "timing/total_training_duration",
+            total_training_duration,
+            self.state.current_step,
+        )
+
+        # Calculate and log timing statistics
+        avg_epoch_duration = sum(epoch_durations) / len(epoch_durations)
+        self.reporter.log_scalar(
+            "timing/avg_epoch_duration",
+            avg_epoch_duration,
+            self.state.current_step,
+        )
+
+        self.logger.info(
+            f"Training completed in {total_training_duration:.2f} seconds ({total_training_duration / 3600:.2f} hours)"
+        )
+        self.logger.info(f"Average epoch duration: {avg_epoch_duration:.2f} seconds")
+
+        # Close TensorBoard logger
+        self.reporter.close()
+
+        # Final saving and upload
+        self.logger.info("Saving final artifacts...")
+        artifacts_dir = Path(self.args.output_dir)
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy TensorBoard logs to artifacts directory
+        tb_logs_source = Path(self.args.logging_dir) / "training"
+        tb_logs_target = artifacts_dir / "tensorboard_logs"
+        if tb_logs_source.exists():
+            shutil.copytree(tb_logs_source, tb_logs_target, dirs_exist_ok=True)
+            self.logger.info(f"TensorBoard logs copied to {tb_logs_target}")
+
+        # Copy only the best checkpoint to the output directory
+        checkpoint_dir = Path(self.args.logging_dir)
+        best_checkpoint_step = self.state.best_checkpoint_step
+        output_checkpoint_path = artifacts_dir / "model_checkpoint"
+        checkpoint_copied = False
+
+        if best_checkpoint_step >= 0:
+            best_checkpoint_path = checkpoint_dir / str(best_checkpoint_step)
+
+            if best_checkpoint_path.exists():
+                self.logger.info(
+                    f"Copying best checkpoint (step {best_checkpoint_step}, {self.args.best_metric_key}={self.state.best_metric_value:.6f}) to {output_checkpoint_path}"
+                )
+                shutil.copytree(
+                    best_checkpoint_path, output_checkpoint_path, dirs_exist_ok=True
+                )
+                self.logger.info(f"Best checkpoint saved to {output_checkpoint_path}")
+                checkpoint_copied = True
+            else:
+                self.logger.warning(
+                    f"Best checkpoint path {best_checkpoint_path} does not exist."
+                )
+        else:
+            self.logger.warning("No best checkpoint recorded.")
+
+        # Fallback: copy the latest checkpoint if best checkpoint wasn't copied
+        if not checkpoint_copied:
+            self.logger.info("Attempting to copy the latest checkpoint instead...")
+            # Find all numeric subdirectories (checkpoint steps)
+            checkpoint_steps = []
+            if checkpoint_dir.exists():
+                for item in checkpoint_dir.iterdir():
+                    if item.is_dir() and item.name.isdigit():
+                        checkpoint_steps.append(int(item.name))
+
+            if checkpoint_steps:
+                latest_step = max(checkpoint_steps)
+                latest_checkpoint_path = checkpoint_dir / str(latest_step)
+
+                if latest_checkpoint_path.exists():
+                    self.logger.info(
+                        f"Copying latest checkpoint (step {latest_step}) to {output_checkpoint_path}"
+                    )
+                    shutil.copytree(
+                        latest_checkpoint_path,
+                        output_checkpoint_path,
+                        dirs_exist_ok=True,
+                    )
+                    self.logger.info(
+                        f"Latest checkpoint saved to {output_checkpoint_path}"
+                    )
+                    checkpoint_copied = True
+                else:
+                    self.logger.warning(
+                        f"Latest checkpoint path {latest_checkpoint_path} does not exist."
+                    )
+            else:
+                self.logger.warning(
+                    f"No checkpoint directories found in {checkpoint_dir}."
+                )
+
+        if not checkpoint_copied:
+            self.logger.warning("No checkpoint was copied to the output directory.")
+
+        # Save training history (keeping minimal data for compatibility)
+        training_summary = {
+            "total_training_duration": total_training_duration,
+            "avg_epoch_duration": avg_epoch_duration,
+            "num_epochs_completed": len(epoch_durations),
+            "global_steps": self.state.current_step,
+            "global_optimizer_steps": self.state.optimizer_step,
+            "best_checkpoint_step": self.state.best_checkpoint_step,
+            "best_metric_value": self.state.best_metric_value,
+            "best_metric_key": self.args.best_metric_key,
+            "params": asdict(count_parameters(self.model)),
+        }
+        with open(artifacts_dir / "train_history.json", "w") as f:
+            json.dump(training_summary, f, indent=4)
+        self.logger.info(
+            f"Training history saved to {artifacts_dir / 'train_history.json'}"
+        )
+
+        with open(artifacts_dir / "config.json", "w") as f:
+            json.dump(asdict(self.model_config), f, indent=4)
+        self.logger.info(f"Model config saved to {artifacts_dir / 'config.json'}")
+
+        # Save trainer config
+        with open(artifacts_dir / "trainer_config.json", "w") as f:
+            trainer_config_dict = asdict(self.args)
+            if "hub_token" in trainer_config_dict:
+                trainer_config_dict.pop("hub_token")
+            json.dump(trainer_config_dict, f, indent=4)
+        self.logger.info(
+            f"Trainer config saved to {artifacts_dir / 'trainer_config.json'}"
+        )
+
+        # Save timing summary
+        timing_summary = {
+            "total_training_duration_seconds": total_training_duration,
+            "total_training_duration_hours": total_training_duration / 3600,
+            "average_epoch_duration_seconds": avg_epoch_duration,
+            "num_epochs_completed": len(epoch_durations),
+            "num_evaluations_completed": len(epoch_durations),  # One eval per epoch
+        }
+        with open(artifacts_dir / "timing_summary.json", "w") as f:
+            json.dump(timing_summary, f, indent=4)
+        self.logger.info(
+            f"Timing summary saved to {artifacts_dir / 'timing_summary.json'}"
+        )
+
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback.on_train_end()
