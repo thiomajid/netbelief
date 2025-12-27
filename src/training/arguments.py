@@ -1,8 +1,6 @@
 import math
-import typing as tp
 from dataclasses import dataclass
 
-import jax
 import jax.numpy as jnp
 
 from src.utils.types import LoguruLogger
@@ -31,7 +29,8 @@ class TrainingConfig:
     gradient_accumulation_steps: int
 
     # optimization
-    point_weight: tp.Union[jax.Array, float]
+    point_weight: float
+    """This property is later transformed into a JAX array in the __post_init__ hook"""
     metrics: tuple[str, ...]
     seed: int
     learning_rate: float
