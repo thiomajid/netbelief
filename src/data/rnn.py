@@ -4,8 +4,8 @@ import grain.python as grain
 import numpy as np
 import polars as pl
 from einops import rearrange
-from sklearn.preprocessing import StandardScaler
 
+from src.data.scaler import MultiDimStandardScaler
 from src.utils.types import LoguruLogger
 
 
@@ -167,8 +167,8 @@ def create_lstm_dataloaders(
     train_context, train_target = context[:split_index], target[:split_index]
     test_context, test_target = context[split_index:], target[split_index:]
 
-    feature_scaler = StandardScaler()
-    target_scaler = StandardScaler()
+    feature_scaler = MultiDimStandardScaler(axis=(0, 3))
+    target_scaler = MultiDimStandardScaler(axis=(0, 3))
 
     train_context_scaled = feature_scaler.fit_transform(train_context)
     train_target_scaled = target_scaler.fit_transform(train_target)
