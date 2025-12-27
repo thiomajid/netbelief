@@ -12,14 +12,14 @@ import jax.numpy as jnp
 import optax
 from flax import nnx
 from jax.sharding import Mesh, NamedSharding
-from loguru import Logger
 from tqdm.auto import tqdm
 
+from src.training.arguments import TrainingConfig, TrainingSteps
+from src.training.callback import Callback
 from src.training.module import count_parameters
-from training.arguments import TrainingConfig, TrainingSteps
-from training.callback import Callback
-from training.state import TrainerState
-from training.tensorboard import TensorBoardLogger
+from src.training.state import TrainerState
+from src.training.tensorboard import TensorBoardLogger
+from src.utils.types import LoguruLogger
 
 _Batch = tuple[jax.Array, jax.Array]  # input_ids and labels
 
@@ -48,7 +48,7 @@ class Trainer:
         train_metrics: nnx.Metric,
         eval_metrics: nnx.Metric,
         reporter: TensorBoardLogger,
-        logger: Logger,
+        logger: LoguruLogger,
         steps_config: TrainingSteps,
         callbacks: tp.Optional[tuple[Callback]] = None,
     ):

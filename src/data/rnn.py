@@ -1,9 +1,10 @@
 import typing as tp
 
 import grain.python as grain
-from loguru import Logger
 import numpy as np
 from einops import rearrange
+
+from src.utils.types import LoguruLogger
 
 
 def partition_logs(
@@ -68,7 +69,7 @@ def create_lstm_dataloaders(
     seed: int,
     worker_count: int,
     worker_buffer_size: int,
-    logger:Logger,
+    logger: LoguruLogger,
     drop_remainder: bool = True,
     train_operations: tp.Optional[tp.Sequence[grain.Transformation]] = None,
     eval_operations: tp.Optional[tp.Sequence[grain.Transformation]] = None,

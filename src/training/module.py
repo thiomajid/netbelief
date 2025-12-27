@@ -7,7 +7,8 @@ import jax.tree as jtu
 import orbax.checkpoint as ocp
 from flax import nnx
 from jax.sharding import Mesh
-from loguru import Logger
+
+from src.utils.types import LoguruLogger
 
 _dtype_map = {
     "fp32": jnp.float32,
@@ -100,7 +101,7 @@ def load_sharded_checkpoint_state(
     model: nnx.Module,
     checkpoint_path: str | Path,
     mesh: Mesh,
-    logger: Logger,
+    logger: LoguruLogger,
 ) -> nnx.Module:
     """Load a model from a checkpoint."""
     abstract_model = nnx.eval_shape(lambda: model)
@@ -129,7 +130,7 @@ def load_sharded_checkpoint_state(
 
 
 def checkpoint_post_eval(
-    logger: Logger,
+    logger: LoguruLogger,
     model: nnx.Module,
     checkpoint_dir: Path,
     options: ocp.CheckpointManagerOptions,

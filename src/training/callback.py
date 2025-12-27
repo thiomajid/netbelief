@@ -3,11 +3,11 @@ from pathlib import Path
 import orbax.checkpoint as ocp
 from flax import nnx
 from huggingface_hub import create_repo, repo_exists, upload_folder
-from loguru import Logger
 
+from src.training.arguments import TrainingConfig
 from src.training.module import checkpoint_post_eval
-from training.arguments import TrainingConfig
-from training.state import TrainerState
+from src.training.state import TrainerState
+from src.utils.types import LoguruLogger
 
 
 class Callback:
@@ -33,7 +33,7 @@ class CheckpointCallback(Callback):
         model: nnx.Module,
         options: ocp.CheckpointManagerOptions,
         checkpoint_dir: Path,
-        logger: Logger,
+        logger: LoguruLogger,
     ):
         super().__init__()
 
@@ -55,7 +55,7 @@ class CheckpointCallback(Callback):
 
 
 class PushToHubCallback(Callback):
-    def __init__(self, logger: Logger, args: TrainingConfig):
+    def __init__(self, logger: LoguruLogger, args: TrainingConfig):
         super().__init__()
 
         self.logger = logger

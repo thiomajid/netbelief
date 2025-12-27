@@ -6,12 +6,13 @@ import jax.tree_util as jtu
 import numpy as np
 import optax
 from flax.metrics.tensorboard import SummaryWriter
-from loguru import Logger
+
+from src.utils.types import LoguruLogger
 
 
 class TensorBoardLogger:
     def __init__(
-        self, log_dir: tp.Union[str, Path], logger: Logger, name: str = "train"
+        self, log_dir: tp.Union[str, Path], logger: LoguruLogger, name: str = "train"
     ):
         """Initialize TensorBoard logger.
 

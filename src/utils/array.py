@@ -1,8 +1,9 @@
 import jax
-from loguru import Logger
+
+from src.utils.types import LoguruLogger
 
 
-def log_node_devices_stats(logger: Logger):
+def log_node_devices_stats(logger: LoguruLogger):
     devices = jax.devices()
     logger.info(f"Found {len(devices)} devices.")
 

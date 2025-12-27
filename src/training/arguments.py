@@ -1,7 +1,7 @@
 import math
 from dataclasses import dataclass
 
-from loguru import Logger
+from src.utils.types import LoguruLogger
 
 
 @dataclass
@@ -79,7 +79,7 @@ def compute_training_steps(
     args: TrainingConfig,
     train_samples: int,
     eval_samples: int,
-    logger: Logger,
+    logger: LoguruLogger,
 ) -> TrainingSteps:
     if args.gradient_accumulation_steps <= 0:
         raise ValueError("gradient_accumulation_steps must be positive")
