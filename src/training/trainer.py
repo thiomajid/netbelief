@@ -399,6 +399,11 @@ class Trainer:
             "params": asdict(count_parameters(self.model)),
         }
         with open(artifacts_dir / "train_history.json", "w") as f:
+            training_summary = {
+                k: v.item() if isinstance(v, jax.Array) else v
+                for k, v in training_summary.items()
+            }
+
             json.dump(training_summary, f, indent=4)
         self.logger.info(
             f"Training history saved to {artifacts_dir / 'train_history.json'}"
