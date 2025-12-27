@@ -234,8 +234,8 @@ def main(cfg: DictConfig):
 
     # Create data transforms pipeline
     train_transforms = [
-        DeviceMaskingTransform(mask_prob=args.mask_prob),
         grain.Batch(batch_size=args.per_device_train_batch_size, drop_remainder=True),
+        DeviceMaskingTransform(mask_prob=args.mask_prob),
     ]
 
     eval_transforms = [
