@@ -199,7 +199,7 @@ def create_lstm_dataloaders(
         worker_count=worker_count,
         worker_buffer_size=worker_buffer_size,
         sampler=grain.IndexSampler(
-            num_records=len(train_source),
+            num_records=len(val_source),
             shuffle=False,
             num_epochs=1,
             seed=seed,
