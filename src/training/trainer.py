@@ -234,7 +234,6 @@ class Trainer:
                     self.eval_metrics,
                 )
 
-                self.logger.info(f"Processed {eval_batch_count} evaluation batches")
                 eval_end_time = perf_counter()
                 eval_duration = eval_end_time - eval_start_time
 
