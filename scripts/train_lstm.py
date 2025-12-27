@@ -245,6 +245,7 @@ def main(cfg: DictConfig):
 
     eval_transforms = [
         grain.Batch(batch_size=args.per_device_eval_batch_size, drop_remainder=True),
+        DeviceMaskingTransform(mask_prob=0.0),  # no masking
     ]
 
     train_loader, eval_loader, feature_scaler, target_scaler = create_lstm_dataloaders(

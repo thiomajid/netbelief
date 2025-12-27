@@ -19,7 +19,7 @@ class StandardScalingTransform(grain.MapTransform):
 
 class DeviceMaskingTransform(grain.RandomMapTransform):
     def __init__(self, mask_prob: float):
-        assert 0 < mask_prob < 1, (
+        assert 0.0 <= mask_prob <= 1.0, (
             f"The mask's probability {mask_prob} must be in (0, 1)"
         )
         self.mask_prob = mask_prob
@@ -44,7 +44,7 @@ class DeviceMaskingTransform(grain.RandomMapTransform):
 
 class FeatureMaskingTransform(grain.RandomMapTransform):
     def __init__(self, mask_prob: float):
-        assert 0 < mask_prob < 1, (
+        assert 0.0 <= mask_prob <= 1.0, (
             f"The mask's probability {mask_prob} must be in (0, 1)"
         )
         self.mask_prob = mask_prob
