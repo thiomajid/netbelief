@@ -137,7 +137,7 @@ class PlotForecastCallback(Callback):
             img = np.array(Image.open(buffer).convert("RGB"))
 
             self.reporter.log_figure(
-                tag="forecast/sample",
+                tag=f"Forecast/Device_{device_idx}_Metric_{metric_idx}",
                 figure=img,
                 step=state.current_step,
             )
