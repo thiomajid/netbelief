@@ -253,7 +253,6 @@ def main(cfg: DictConfig):
         drop_remainder=args.drop_remainder,
         train_operations=train_transforms,
         eval_operations=eval_transforms,
-        logger=logger,
     )
 
     # Setup the training loop
