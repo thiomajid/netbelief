@@ -1,8 +1,6 @@
 import math
 from dataclasses import dataclass
 
-import jax.numpy as jnp
-
 from src.utils.types import LoguruLogger
 
 
@@ -30,7 +28,6 @@ class TrainingConfig:
 
     # optimization
     point_weight: float
-    """This property is later transformed into a JAX array in the __post_init__ hook"""
     metrics: tuple[str, ...]
     seed: int
     learning_rate: float
@@ -69,7 +66,6 @@ class TrainingConfig:
         self.mesh_shape = tuple(self.mesh_shape)
         self.axis_names = tuple(self.axis_names)
         self.metrics = tuple(self.metrics)
-        self.point_weight = jnp.array(self.point_weight)
 
 
 @dataclass

@@ -99,6 +99,7 @@ class Trainer:
 
     def train(self):
         epoch_durations = []
+        POINT_WEIGHT = jnp.array(self.args.point_weight)
 
         self.on_train_start()  #! Callback hook
         training_start_time = perf_counter()
@@ -143,7 +144,7 @@ class Trainer:
                     self.model,
                     step_batch,
                     self.quantiles,
-                    self.args.point_weight,
+                    POINT_WEIGHT,
                     self.optimizer,
                     self.train_metrics,
                 )
@@ -230,7 +231,7 @@ class Trainer:
                     self.model,
                     step_batch,
                     self.quantiles,
-                    self.args.point_weight,
+                    POINT_WEIGHT,
                     self.eval_metrics,
                 )
 
