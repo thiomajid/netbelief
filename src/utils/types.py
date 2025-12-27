@@ -26,7 +26,7 @@ class EncodedBelief:
 @struct.dataclass
 class ForecasterInput:
     series: np.ndarray
-    target: np.ndarray
+    targets: np.ndarray
     mask: tp.Optional[np.ndarray] = struct.field(default=None)
 
 

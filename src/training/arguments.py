@@ -1,5 +1,9 @@
 import math
+import typing as tp
 from dataclasses import dataclass
+
+import jax
+import jax.numpy as jnp
 
 from src.utils.types import LoguruLogger
 
@@ -27,6 +31,7 @@ class TrainingConfig:
     gradient_accumulation_steps: int
 
     # optimization
+    point_weight: tp.Union[jax.Array, float]
     metrics: tuple[str, ...]
     seed: int
     learning_rate: float
@@ -60,9 +65,12 @@ class TrainingConfig:
 
         assert self.metrics is not None and len(self.metrics) >= 1
 
+        assert self.point_weight > 0, "point_weight must be greater than 0"
+
         self.mesh_shape = tuple(self.mesh_shape)
         self.axis_names = tuple(self.axis_names)
         self.metrics = tuple(self.metrics)
+        self.point_weight = jnp.array(self.point_weight)
 
 
 @dataclass

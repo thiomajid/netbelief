@@ -19,7 +19,7 @@ from src.training.callback import Callback
 from src.training.module import count_parameters
 from src.training.state import TrainerState
 from src.training.tensorboard import TensorBoardLogger
-from src.utils.types import LoguruLogger
+from src.utils.types import ForecasterInput, LoguruLogger
 
 _Batch = tuple[jax.Array, jax.Array]  # input_ids and labels
 
@@ -37,6 +37,7 @@ class Trainer:
         model: nnx.Module,
         model_config: tp.Any,
         args: TrainingConfig,
+        quantiles: tp.Sequence[float],
         optimizer: nnx.Optimizer,
         lr_scheduler: optax.Schedule,
         mesh: Mesh,
@@ -55,6 +56,7 @@ class Trainer:
         self.model = model
         self.model_config = model_config
         self.args = args
+        self.quantiles = quantiles
         self.train_dataloader = train_dataloader
         self.eval_dataloader = eval_dataloader
         self.optimizer = optimizer
@@ -96,7 +98,6 @@ class Trainer:
                 callback.on_epoch_end(self.state, metrics)
 
     def train(self):
-        labels_dtype = jnp.int32
         epoch_durations = []
 
         self.on_train_start()  #! Callback hook
@@ -110,7 +111,7 @@ class Trainer:
             epoch_start_time = perf_counter()
             epoch_desc = f"Epoch {epoch + 1}/{self.args.num_epochs}"
 
-            train_pbar = tqdm(
+            train_pbar: tp.Sequence[ForecasterInput] = tqdm(
                 self.train_dataloader,
                 total=self.steps_config.steps_per_epoch,
                 desc=epoch_desc,
@@ -123,30 +124,26 @@ class Trainer:
 
             for batch in train_pbar:
                 self.state.current_step += 1  # Count every batch as a step
-                input_ids = jnp.array(batch["input_ids"])
-                attention_mask = jnp.array(batch["attention_mask"])
-                labels = jnp.array(batch["labels"], dtype=labels_dtype)
+                series = jnp.array(batch.series)
+                target = jnp.array(batch.targets)
 
                 # Grain may add an additional batch dim
-                if input_ids.shape[0] == 1:
-                    input_ids = input_ids.squeeze(0)
+                if series.shape[0] == 1:
+                    series = series.squeeze(0)
 
-                if attention_mask.shape[0] == 1:
-                    attention_mask = attention_mask.squeeze(0)
-
-                if labels.shape[0] == 1:
-                    labels = labels.squeeze(0)
+                if target.shape[0] == 1:
+                    target = target.squeeze(0)
 
                 # Data placement
-                input_ids = jax.device_put(input_ids, self.data_sharding)
-                attention_mask = jax.device_put(attention_mask, self.data_sharding)
-                labels = jax.device_put(labels, self.data_sharding)
-                step_batch = (input_ids, labels)
+                series = jax.device_put(series, self.data_sharding)
+                target = jax.device_put(target, self.data_sharding)
+                step_batch = (series, target)
 
                 loss, grads, grad_norm = self._train_step_fn(
                     self.model,
                     step_batch,
-                    attention_mask,
+                    self.quantiles,
+                    self.args.point_weight,
                     self.optimizer,
                     self.train_metrics,
                 )
@@ -206,7 +203,7 @@ class Trainer:
 
             self.model.eval()
             eval_start_time = perf_counter()
-            eval_pbar = tqdm(
+            eval_pbar: tp.Sequence[ForecasterInput] = tqdm(
                 self.eval_dataloader,
                 desc=f"Evaluating Epoch {epoch + 1}",
                 leave=False,
@@ -214,30 +211,26 @@ class Trainer:
 
             for batch in eval_pbar:
                 eval_batch_count += 1
-                input_ids = jnp.array(batch["input_ids"])
-                attention_mask = jnp.array(batch["attention_mask"])
-                labels = jnp.array(batch["labels"], dtype=labels_dtype)
+                series = jnp.array(batch.series)
+                target = jnp.array(batch.targets)
 
                 # Grain may add an additional batch dim
-                if input_ids.shape[0] == 1:
-                    input_ids = input_ids.squeeze(0)
+                if series.shape[0] == 1:
+                    series = series.squeeze(0)
 
-                if attention_mask.shape[0] == 1:
-                    attention_mask = attention_mask.squeeze(0)
-
-                if labels.shape[0] == 1:
-                    labels = labels.squeeze(0)
+                if target.shape[0] == 1:
+                    target = target.squeeze(0)
 
                 # Data placement
-                input_ids = jax.device_put(input_ids, self.data_sharding)
-                attention_mask = jax.device_put(attention_mask, self.data_sharding)
-                labels = jax.device_put(labels, self.data_sharding)
+                series = jax.device_put(series, self.data_sharding)
+                target = jax.device_put(target, self.data_sharding)
 
-                step_batch = (input_ids, labels)
+                step_batch = (series, target)
                 self._eval_step_fn(
                     self.model,
                     step_batch,
-                    attention_mask,
+                    self.quantiles,
+                    self.args.point_weight,
                     self.eval_metrics,
                 )
 

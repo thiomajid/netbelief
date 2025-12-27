@@ -25,6 +25,9 @@ class LSTMForecasterConfig:
     use_device_mixer: bool = True
     quantiles: tuple[float, ...] = (0.1, 0.5, 0.9, 0.95)
 
+    def __post_init__(self):
+        self.quantiles = tuple(self.quantiles)
+
 
 @dataclass(unsafe_hash=True, eq=True)
 class LSTMForecasterShardings:

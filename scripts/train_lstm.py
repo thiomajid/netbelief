@@ -10,6 +10,7 @@ from pprint import pprint
 import grain.python as grain
 import hydra
 import jax
+import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
 from datasets import load_dataset
@@ -379,10 +380,13 @@ def main(cfg: DictConfig):
         PushToHubCallback(logger=logger, args=args),
     ]
 
+    QUANTILES = jnp.array(model_config.quantiles)
+
     trainer = Trainer(
         model=model,
         model_config=model_config,
         args=args,
+        quantiles=QUANTILES,
         optimizer=optimizer,
         lr_scheduler=cosine_schedule,
         mesh=mesh,

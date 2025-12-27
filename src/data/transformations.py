@@ -25,7 +25,7 @@ class DeviceMaskingTransform(grain.RandomMapTransform):
         self.mask_prob = mask_prob
 
     def random_map(self, element: tuple[np.ndarray, np.ndarray], rng):
-        series, target = element
+        series, targets = element
         B, D, M, T = series.shape
 
         # 1 = mask this device, 0 = keep it
@@ -37,7 +37,7 @@ class DeviceMaskingTransform(grain.RandomMapTransform):
 
         return ForecasterInput(
             series=masked_series,
-            target=target,
+            targets=targets,
             mask=mask.astype(np.bool_),
         )
 
@@ -62,6 +62,6 @@ class FeatureMaskingTransform(grain.RandomMapTransform):
 
         return ForecasterInput(
             series=masked_series,
-            target=target,
+            targets=target,
             mask=mask.astype(np.bool_),
         )
