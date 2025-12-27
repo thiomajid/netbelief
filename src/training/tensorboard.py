@@ -82,6 +82,21 @@ class TensorBoardLogger:
 
         self.writer.histogram(tag, values, step)
 
+    def log_figure(
+        self,
+        tag: str,
+        figure,
+        step: int,
+    ):
+        """Log a matplotlib figure as an image.
+
+        Args:
+            tag: Name for the figure
+            figure: Matplotlib figure object
+            step: Global step
+        """
+        self.writer.image(tag, figure, step)
+
     def log_learning_rate(self, lr: float, step: int):
         """Log learning rate.
 

@@ -1,5 +1,7 @@
 import sys
 
+from src.utils.types import ForecasterInput
+
 sys.path.append("../")
 
 
@@ -31,7 +33,11 @@ from src.modules.lstm import (
     LSTMForecasterShardings,
 )
 from src.training.arguments import TrainingConfig, compute_training_steps
-from src.training.callback import CheckpointCallback, PushToHubCallback
+from src.training.callback import (
+    CheckpointCallback,
+    PlotForecastCallback,
+    PushToHubCallback,
+)
 from src.training.loss import dual_head_loss
 from src.training.module import (
     count_parameters,
@@ -380,6 +386,18 @@ def main(cfg: DictConfig):
     logger.info(f"Total optimizer steps = {max_optimizer_steps}")
 
     DATA_SHARDING = NamedSharding(mesh, spec=P("dp", None))
+    GENERATION_SAMPLE: ForecasterInput = next(iter(train_loader))
+
+    SAMPLE_SERIES = jnp.array(GENERATION_SAMPLE.series)
+    if SAMPLE_SERIES.shape[0] == 1:
+        SAMPLE_SERIES = SAMPLE_SERIES.squeeze(0)
+    SAMPLE_SERIES = jax.device_put(SAMPLE_SERIES, DATA_SHARDING)
+
+    SAMPLE_TARGETS = jnp.array(GENERATION_SAMPLE.targets)
+    if SAMPLE_TARGETS.shape[0] == 1:
+        SAMPLE_TARGETS = SAMPLE_TARGETS.squeeze(0)
+    SAMPLE_TARGETS = jax.device_put(SAMPLE_TARGETS, DATA_SHARDING)
+
     CALLBACKS = [
         CheckpointCallback(
             model=model,
@@ -388,6 +406,12 @@ def main(cfg: DictConfig):
             logger=logger,
         ),
         PushToHubCallback(logger=logger, args=args),
+        PlotForecastCallback(
+            model=model,
+            reporter=reporter,
+            series=SAMPLE_SERIES,
+            targets=SAMPLE_TARGETS,
+        ),
     ]
 
     QUANTILES = jnp.array(model_config.quantiles)
