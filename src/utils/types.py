@@ -6,10 +6,6 @@ from flax import struct
 from loguru import logger as _logger
 
 LoguruLogger = type[_logger]
-
-a: LoguruLogger
-
-
 ShardingRule = tuple[tp.Optional[str], ...]
 
 ForecastingMode = tp.Literal["autoregressive", "multi-step"]

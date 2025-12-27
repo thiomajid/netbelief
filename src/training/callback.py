@@ -1,11 +1,14 @@
+import io
 import random
 from pathlib import Path
 
 import jax
 import matplotlib.pyplot as plt
+import numpy as np
 import orbax.checkpoint as ocp
 from flax import nnx
 from huggingface_hub import create_repo, repo_exists, upload_folder
+from PIL import Image
 
 from src.modules.lstm import LSTMForecaster
 from src.training.arguments import TrainingConfig
@@ -13,6 +16,7 @@ from src.training.module import checkpoint_post_eval
 from src.training.state import TrainerState
 from src.training.tensorboard import TensorBoardLogger
 from src.utils.types import LoguruLogger
+from src.utils.viz import plot_forecast
 
 
 class Callback:
@@ -107,23 +111,17 @@ class PlotForecastCallback(Callback):
         self.reporter = reporter
 
     def on_epoch_end(self, state: TrainerState, metrics: dict):
-        from src.utils.viz import plot_forecast
-
-        # Get predictions from model
         output = self.model(self.series)
         batch, devices, num_metrics, _ = output.point_predictions.shape
 
-        # Randomly select a sample to visualize
         batch_idx = random.randint(0, batch - 1)
         device_idx = random.randint(0, devices - 1)
         metric_idx = random.randint(0, num_metrics - 1)
 
-        # Extract the context (input series), predictions, and ground truth
         context = self.series[batch_idx, device_idx, metric_idx, :]
         predicted = output.point_predictions[batch_idx, device_idx, metric_idx, :]
         gt_series = self.targets[batch_idx, device_idx, metric_idx, :]
 
-        # Create the plot
         fig, ax = plt.subplots(figsize=(12, 6))
         plot_forecast(
             context=context,
@@ -133,12 +131,18 @@ class PlotForecastCallback(Callback):
             title=f"Forecast - Device {device_idx}, Metric {metric_idx}",
         )
 
-        # Log to TensorBoard
-        self.reporter.log_figure(
-            tag="forecast/sample",
-            figure=fig,
-            step=state.current_step,
-        )
+        with io.BytesIO() as buffer:
+            fig.savefig(buffer, format="png", bbox_inches="tight")
+            buffer.seek(0)
+            img = np.array(Image.open(buffer).convert("RGB"))
 
-        # Close the figure to free memory
+            self.reporter.log_figure(
+                tag="forecast/sample",
+                figure=img,
+                step=state.current_step,
+            )
+
         plt.close(fig)
+
+        del fig
+        del ax
