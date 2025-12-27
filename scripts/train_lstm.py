@@ -22,7 +22,7 @@ from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import checkpoint_managers
 from transformers import HfArgumentParser
 
-from src.data.rnn import create_lstm_dataloaders
+from src.data.rnn import convert_dataframe_to_numpy, create_lstm_dataloaders
 from src.data.transformations import DeviceMaskingTransform
 from src.modules.lstm import (
     LSTMForecaster,
@@ -229,7 +229,7 @@ def main(cfg: DictConfig):
     data = hub_data.select_columns(args.metrics).to_polars()
     logger.info(f"Dataset columns are {data.columns}")
 
-    data = data.to_numpy()
+    data = convert_dataframe_to_numpy(df=data, metrics=args.metrics, logger=logger)
     logger.info(f"Dataset in numpy format has shape {data.shape}")
 
     # Create data transforms pipeline
@@ -242,13 +242,11 @@ def main(cfg: DictConfig):
         grain.Batch(batch_size=args.per_device_eval_batch_size, drop_remainder=True),
     ]
 
-    NUM_DEVICES = len(hub_data.unique("flow_start"))
     train_loader, eval_loader = create_lstm_dataloaders(
         data=data,
         lookback=args.lookback,
         horizon=args.horizon,
         train_fraction=args.train_fraction,
-        num_devices=NUM_DEVICES,
         seed=args.seed,
         worker_count=args.worker_count,
         worker_buffer_size=args.worker_buffer_size,
