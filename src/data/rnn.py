@@ -4,6 +4,7 @@ import grain.python as grain
 import numpy as np
 import polars as pl
 from einops import rearrange
+from sklearn.preprocessing import StandardScaler
 
 from src.utils.types import LoguruLogger
 
@@ -164,10 +165,19 @@ def create_lstm_dataloaders(
     context, target = partition_logs(data, lookback=lookback, horizon=horizon)
     split_index = int(context.shape[0] * train_fraction)
     train_context, train_target = context[:split_index], target[:split_index]
-    val_context, val_target = context[split_index:], target[split_index:]
+    test_context, test_target = context[split_index:], target[split_index:]
 
-    train_source = MetricsDataSource(train_context, train_target)
-    val_source = MetricsDataSource(val_context, val_target)
+    feature_scaler = StandardScaler()
+    target_scaler = StandardScaler()
+
+    train_context_scaled = feature_scaler.fit_transform(train_context)
+    train_target_scaled = target_scaler.fit_transform(train_target)
+
+    test_context_scaled = feature_scaler.transform(test_context)
+    test_target_scaled = target_scaler.transform(test_target)
+
+    train_source = MetricsDataSource(train_context_scaled, train_target_scaled)
+    val_source = MetricsDataSource(test_context_scaled, test_target_scaled)
 
     train_loader = grain.DataLoader(
         data_source=train_source,
