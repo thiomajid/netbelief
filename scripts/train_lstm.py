@@ -354,7 +354,7 @@ def main(cfg: DictConfig):
     reporter = TensorBoardLogger(
         log_dir=args.logging_dir,
         logger=logger,
-        name=args.hub_model_id.split("/")[-1],
+        name=args.run_name,
     )
 
     # Checkpoint manager
