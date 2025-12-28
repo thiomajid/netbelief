@@ -26,6 +26,7 @@ class LSTMForecasterConfig:
     num_blocks: int = 2
     bidirectional: bool = False
     quantiles: tuple[float, ...] = (0.1, 0.5, 0.9, 0.95)
+    attention_impl: str = "xla"
 
     def __post_init__(self):
         self.quantiles = tuple(self.quantiles)
@@ -115,7 +116,7 @@ class ForecasterBlock(nnx.Module):
                 dtype=dtype,
                 param_dtype=param_dtype,
                 normalize_qk=config.normalize_qk,
-                implementation="xla",
+                implementation=config.attention_impl,
                 is_causal=False,
                 qkv_kernel_init=nnx.with_partitioning(
                     initializers.lecun_normal(),
