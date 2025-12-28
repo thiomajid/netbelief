@@ -150,8 +150,8 @@ class ForecasterBlock(nnx.Module):
 
         normed_hidden = rearrange(self.mixer_norm(hidden_seq), "b d t h -> (b t) d h")
         mixer_output, attention_output = self.mixer(normed_hidden)
-        mixer_output = rearrange(mixer_output, "(b t) d h -> b d t h", b=batch)
-        belief = self.down_proj(hidden_seq + mixer_output)
+        belief = self.down_proj(mixer_output)
+        belief = rearrange(belief, "(b t) d h -> b d t h", b=batch)
 
         return belief, EncodedBelief(
             belief=belief,
