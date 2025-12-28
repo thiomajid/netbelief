@@ -77,10 +77,10 @@ model:
   attention_impl: "xla"
 
 shardings:
-  norm: [null]
+  norm: ["tp"]
   lstm_input_kernel: [null, "tp"]
   lstm_recurrent_kernel: [null, "tp"]
-  lstm_bias: [null]
+  lstm_bias: ["tp"]
   attn_qkv: [null, "tp"]
   attn_output: ["tp", null]
   attn_norm: ["tp"]
