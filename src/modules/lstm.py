@@ -22,8 +22,8 @@ class LSTMForecasterConfig:
     horizon: int = 1
     head_bias: bool = False
     normalize_qk: bool = True
-    use_device_mixer: bool = False
-    num_blocks: int = 2
+    use_device_mixer: bool = True
+    num_blocks: int = 3
     bidirectional: bool = False
     quantiles: tuple[float, ...] = (0.1, 0.5, 0.9, 0.95)
     attention_impl: str = "xla"
@@ -167,7 +167,8 @@ class ForecasterBlock(nnx.Module):
         chex.assert_rank(series, 4)
 
         batch, devices, time, features = series.shape
-        flat_series = rearrange(series, "b d h t -> (b d) t h")
+        flat_series = rearrange(series, "b d t h -> (b d) t h")
+
         hidden_seq = self.rnn(
             flat_series,
             reverse=self.reverse,
