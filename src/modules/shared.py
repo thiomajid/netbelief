@@ -105,7 +105,7 @@ class GroupedQueryAttention(nnx.Module):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        attention = jax.nn.dot_product_attention(
+        attention: jax.Array = jax.nn.dot_product_attention(
             query=query,
             key=key,
             value=value,

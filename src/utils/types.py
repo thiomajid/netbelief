@@ -15,7 +15,8 @@ AttentionImpl = tp.Literal["xla", "cudnn"]
 @struct.dataclass
 class EncodedBelief:
     belief: jax.Array
-    last_hidden_state: jax.Array
+    rnn_hidden_seq: jax.Array
+    rnn_last_hidden_state: jax.Array
     attention_ouput: tp.Optional[jax.Array] = struct.field(default=None)
 
 
