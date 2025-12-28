@@ -13,7 +13,7 @@ from src.utils.types import ForecasterOutput
 
 if __name__ == "__main__":
     config = LSTMForecasterConfig(
-        hidden_features=512,
+        hidden_features=128,
         num_metrics=10,
         head_bias=True,
         horizon=10,

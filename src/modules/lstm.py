@@ -27,6 +27,9 @@ class LSTMForecasterConfig:
     bidirectional: bool = False
     quantiles: tuple[float, ...] = (0.1, 0.5, 0.9, 0.95)
     attention_impl: str = "xla"
+    conv_kernel_size: int = 3
+    conv_stride: int = 1
+    conv_bias: bool = False
 
     def __post_init__(self):
         self.quantiles = tuple(self.quantiles)
@@ -34,10 +37,12 @@ class LSTMForecasterConfig:
 
 @dataclass(unsafe_hash=True, eq=True)
 class LSTMForecasterShardings:
-    norm: ShardingRule = (None,)
+    proj_conv_kernel: ShardingRule = (None, None, "tp")
+    proj_conv_bias: ShardingRule = ("tp",)
+    norm: ShardingRule = ("tp",)
     lstm_input_kernel: ShardingRule = (None, "tp")
     lstm_recurrent_kernel: ShardingRule = (None, "tp")
-    lstm_bias: ShardingRule = (None,)
+    lstm_bias: ShardingRule = ("tp",)
     attn_qkv: ShardingRule = (None, "tp")
     attn_output: ShardingRule = ("tp", None)
     attn_norm: ShardingRule = ("tp",)
@@ -135,20 +140,23 @@ class ForecasterBlock(nnx.Module):
             self.mixer_norm = nnx.data(None)
             self.mixer = nnx.data(None)
 
-        self.down_proj = self.up_proj = nnx.Linear(
+        self.down_proj = nnx.Conv(
             in_features=intermediate_features,
             out_features=in_features,
-            use_bias=False,
+            kernel_size=(config.conv_kernel_size,),
+            strides=(config.conv_stride,),
+            padding="CAUSAL",
+            use_bias=config.conv_bias,
             rngs=rngs,
             dtype=dtype,
             param_dtype=param_dtype,
             kernel_init=nnx.with_partitioning(
                 initializers.lecun_normal(),
-                sharding=shardings.head_kernel,
+                sharding=shardings.proj_conv_kernel,
             ),
             bias_init=nnx.with_partitioning(
                 initializers.zeros_init(),
-                sharding=shardings.head_bias,
+                sharding=shardings.proj_conv_bias,
             ),
         )
 
@@ -268,26 +276,27 @@ class LSTMForecaster(nnx.Module):
         self.quantiles = config.quantiles
         self.num_quantiles = len(config.quantiles)
 
-        # Input projection: metrics -> hidden_features
-        self.up_proj = nnx.Linear(
+        self.up_proj = nnx.Conv(
             in_features=config.num_metrics,
             out_features=config.hidden_features,
-            use_bias=False,
+            kernel_size=(config.conv_kernel_size,),
+            strides=(config.conv_stride,),
+            padding="CAUSAL",
+            use_bias=config.conv_bias,
             rngs=rngs,
             dtype=dtype,
             param_dtype=param_dtype,
             kernel_init=nnx.with_partitioning(
                 initializers.lecun_normal(),
-                sharding=shardings.head_kernel,
+                sharding=shardings.proj_conv_kernel,
             ),
             bias_init=nnx.with_partitioning(
                 initializers.zeros_init(),
-                sharding=shardings.head_bias,
+                sharding=shardings.proj_conv_bias,
             ),
         )
 
         # Build stacked blocks
-
         @nnx.vmap
         def _create_block(rngs: nnx.Rngs):
             return ForecasterBlock(
