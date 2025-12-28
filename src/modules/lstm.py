@@ -9,7 +9,7 @@ from flax import nnx
 from flax.nnx import initializers
 
 from src.modules.attention import GroupedQueryAttention
-from src.modules.convolution import DepthwiseSeparableConvolution
+from src.modules.convolution import CausalDepthwiseSeparableConvolution
 from src.modules.lstm_config import LSTMForecasterConfig, LSTMForecasterShardings
 from src.utils.types import EncodedBelief, ForecasterOutput
 
@@ -57,21 +57,17 @@ class ForecasterBlock(nnx.Module):
 
         self.rnn = nnx.RNN(cell=cell, rngs=rngs, reverse=reverse)
 
-        self.mixer_norm: tp.Optional[nnx.LayerNorm]
+        self.mixer_norm: tp.Optional[nnx.RMSNorm]
         self.mixer: tp.Optional[GroupedQueryAttention]
 
         if config.use_device_mixer:
-            self.mixer_norm = nnx.LayerNorm(
+            self.mixer_norm = nnx.RMSNorm(
                 num_features=intermediate_features,
                 rngs=rngs,
                 dtype=dtype,
                 param_dtype=param_dtype,
                 scale_init=nnx.with_partitioning(
                     initializers.ones_init(),
-                    sharding=shardings.norm,
-                ),
-                bias_init=nnx.with_partitioning(
-                    initializers.zeros_init(),
                     sharding=shardings.norm,
                 ),
             )
@@ -104,7 +100,7 @@ class ForecasterBlock(nnx.Module):
             self.mixer_norm = nnx.data(None)
             self.mixer = nnx.data(None)
 
-        self.down_proj = DepthwiseSeparableConvolution(
+        self.down_proj = CausalDepthwiseSeparableConvolution(
             in_features=intermediate_features,
             out_features=in_features,
             config=config,
@@ -203,16 +199,6 @@ class BidirectionalForecasterBlock(nnx.Module):
 
 
 class LSTMForecaster(nnx.Module):
-    """
-    Stacked LSTM forecaster with optional bidirectional processing.
-
-    Architecture:
-    - Input projection
-    - N blocks of [LSTM -> LayerNorm -> Attention -> Residual]
-    - Optional bidirectional blocks (forward + reverse)
-    - Output heads with pre-norm
-    """
-
     def __init__(
         self,
         config: LSTMForecasterConfig,
@@ -230,7 +216,7 @@ class LSTMForecaster(nnx.Module):
         self.quantiles = config.quantiles
         self.num_quantiles = len(config.quantiles)
 
-        self.up_proj = DepthwiseSeparableConvolution(
+        self.up_proj = CausalDepthwiseSeparableConvolution(
             in_features=config.num_metrics,
             out_features=config.hidden_features,
             config=config,
@@ -289,7 +275,7 @@ class LSTMForecaster(nnx.Module):
             ),
         )
 
-        self.head_norm = nnx.LayerNorm(
+        self.head_norm = nnx.RMSNorm(
             num_features=config.hidden_features,
             rngs=rngs,
             dtype=dtype,

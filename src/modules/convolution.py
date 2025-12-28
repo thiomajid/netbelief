@@ -6,7 +6,7 @@ from flax.nnx import initializers
 from src.modules.lstm_config import LSTMForecasterConfig, LSTMForecasterShardings
 
 
-class DepthwiseSeparableConvolution(nnx.Module):
+class CausalDepthwiseSeparableConvolution(nnx.Module):
     def __init__(
         self,
         config: LSTMForecasterConfig,
