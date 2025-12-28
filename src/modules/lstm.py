@@ -1,5 +1,4 @@
 import typing as tp
-from dataclasses import dataclass
 from functools import partial
 
 import chex
@@ -9,45 +8,10 @@ from einops import rearrange
 from flax import nnx
 from flax.nnx import initializers
 
-from src.modules.shared import GroupedQueryAttention
-from src.utils.types import EncodedBelief, ForecasterOutput, ShardingRule
-
-
-@dataclass(unsafe_hash=True, eq=True)
-class LSTMForecasterConfig:
-    num_metrics: int
-    hidden_features: int
-    num_heads: int = 4
-    num_kv_heads: int = 2
-    horizon: int = 1
-    head_bias: bool = False
-    normalize_qk: bool = True
-    use_device_mixer: bool = True
-    num_blocks: int = 3
-    bidirectional: bool = False
-    quantiles: tuple[float, ...] = (0.1, 0.5, 0.9, 0.95)
-    attention_impl: str = "xla"
-    conv_kernel_size: int = 3
-    conv_stride: int = 1
-    conv_bias: bool = False
-
-    def __post_init__(self):
-        self.quantiles = tuple(self.quantiles)
-
-
-@dataclass(unsafe_hash=True, eq=True)
-class LSTMForecasterShardings:
-    proj_conv_kernel: ShardingRule = (None, None, "tp")
-    proj_conv_bias: ShardingRule = ("tp",)
-    norm: ShardingRule = ("tp",)
-    lstm_input_kernel: ShardingRule = (None, "tp")
-    lstm_recurrent_kernel: ShardingRule = (None, "tp")
-    lstm_bias: ShardingRule = ("tp",)
-    attn_qkv: ShardingRule = (None, "tp")
-    attn_output: ShardingRule = ("tp", None)
-    attn_norm: ShardingRule = ("tp",)
-    head_kernel: ShardingRule = ("tp", None)
-    head_bias: ShardingRule = (None,)
+from src.modules.attention import GroupedQueryAttention
+from src.modules.convolution import DepthwiseSeparableConvolution
+from src.modules.lstm_config import LSTMForecasterConfig, LSTMForecasterShardings
+from src.utils.types import EncodedBelief, ForecasterOutput
 
 
 class ForecasterBlock(nnx.Module):
@@ -140,24 +104,14 @@ class ForecasterBlock(nnx.Module):
             self.mixer_norm = nnx.data(None)
             self.mixer = nnx.data(None)
 
-        self.down_proj = nnx.Conv(
+        self.down_proj = DepthwiseSeparableConvolution(
             in_features=intermediate_features,
             out_features=in_features,
-            kernel_size=(config.conv_kernel_size,),
-            strides=(config.conv_stride,),
-            padding="CAUSAL",
-            use_bias=config.conv_bias,
+            config=config,
+            shardings=shardings,
             rngs=rngs,
             dtype=dtype,
             param_dtype=param_dtype,
-            kernel_init=nnx.with_partitioning(
-                initializers.lecun_normal(),
-                sharding=shardings.proj_conv_kernel,
-            ),
-            bias_init=nnx.with_partitioning(
-                initializers.zeros_init(),
-                sharding=shardings.proj_conv_bias,
-            ),
         )
 
     def __call__(self, series: jax.Array) -> tuple[jax.Array, EncodedBelief]:
@@ -276,24 +230,14 @@ class LSTMForecaster(nnx.Module):
         self.quantiles = config.quantiles
         self.num_quantiles = len(config.quantiles)
 
-        self.up_proj = nnx.Conv(
+        self.up_proj = DepthwiseSeparableConvolution(
             in_features=config.num_metrics,
             out_features=config.hidden_features,
-            kernel_size=(config.conv_kernel_size,),
-            strides=(config.conv_stride,),
-            padding="CAUSAL",
-            use_bias=config.conv_bias,
+            config=config,
+            shardings=shardings,
             rngs=rngs,
             dtype=dtype,
             param_dtype=param_dtype,
-            kernel_init=nnx.with_partitioning(
-                initializers.lecun_normal(),
-                sharding=shardings.proj_conv_kernel,
-            ),
-            bias_init=nnx.with_partitioning(
-                initializers.zeros_init(),
-                sharding=shardings.proj_conv_bias,
-            ),
         )
 
         # Build stacked blocks
