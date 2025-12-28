@@ -120,9 +120,6 @@ class PlotForecastCallback(Callback):
 
         context = self.series[batch_idx, device_idx, metric_idx, :]
         predicted = output.point_predictions[batch_idx, device_idx, metric_idx, :]
-        q_forecast = output.quantile_predictions[
-            :, batch_idx, device_idx, metric_idx, :
-        ]
         gt_series = self.targets[batch_idx, device_idx, metric_idx, :]
 
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -132,8 +129,6 @@ class PlotForecastCallback(Callback):
             ground_truth=gt_series,
             ax=ax,
             title=f"Forecast - Device {device_idx}, Metric {metric_idx}",
-            quantiles=self.model.quantiles,
-            quantile_forecasts=q_forecast,
         )
 
         with io.BytesIO() as buffer:
