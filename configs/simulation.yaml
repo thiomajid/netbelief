@@ -15,6 +15,15 @@ simulation:
   seed: 729
   link_capacity_bps: 10000000
 
+advanced_traffic:
+  enabled: true
+  min_duration: 30.0
+  max_duration: 120.0
+  idle_probability: 0.1
+  server_host: "h0"
+  voip_bandwidth: "100k"
+  video_bandwidth: "800k"
+
 # Moderate variability settings optimized for time series forecasting
 variability:
   enabled: true

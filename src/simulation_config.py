@@ -101,6 +101,25 @@ class BandwidthVariationConfig:
 
 
 @dataclass
+class AdvancedTrafficConfig:
+    """Configuration for advanced traffic generation."""
+
+    enabled: bool = False
+    # Minimum time a host stays with one traffic type (seconds)
+    min_duration: float = 30.0
+    # Maximum time a host stays with one traffic type (seconds)
+    max_duration: float = 120.0
+    # Probability of being idle
+    idle_probability: float = 0.2
+    # Server host name (e.g., "h0")
+    server_host: str = "h0"
+    # VoIP bandwidth
+    voip_bandwidth: str = "100k"
+    # Video streaming bandwidth (approx)
+    video_bandwidth: str = "800k"
+
+
+@dataclass
 class PacketLossConfig:
     """Configuration for packet loss variation events."""
 
@@ -172,5 +191,8 @@ class VoIPSimulationConfig:
 
     topology: TopologyConfig = field(default_factory=TopologyConfig)
     traffic: TrafficConfig = field(default_factory=TrafficConfig)
+    advanced_traffic: AdvancedTrafficConfig = field(
+        default_factory=AdvancedTrafficConfig
+    )
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     variability: VariabilityConfig = field(default_factory=VariabilityConfig)

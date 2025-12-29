@@ -1,16 +1,3 @@
-"""
-VoIP Network Simulation with Hydra configuration.
-
-This script simulates VoIP traffic over a Mininet network topology,
-collecting comprehensive metrics including:
-- Bandwidth, jitter, packet loss (iperf)
-- Round-trip time (ping)
-- Switch port statistics (OVS)
-- Deep packet inspection (tcpdump)
-
-The simulation uses a modular architecture with components in src/simulation/.
-"""
-
 import time
 import typing as tp
 
@@ -26,6 +13,7 @@ from tqdm import tqdm
 from src.simulation import (
     DataCollectorManager,
     NetworkVariabilityManager,
+    TrafficManager,
     cleanup_network,
     ensure_dir,
     load_topology_class,
@@ -33,7 +21,14 @@ from src.simulation import (
     setup_background_pairs,
     setup_voip_pairs,
 )
-from src.simulation.variability import VariabilityConfig
+from src.simulation.variability import (
+    BandwidthVariationConfig,
+    CongestionConfig,
+    DelayVariationConfig,
+    LinkFailureConfig,
+    PacketLossConfig,
+    VariabilityConfig,
+)
 from src.simulation_config import VoIPSimulationConfig
 
 # Register the config with Hydra
@@ -235,6 +230,7 @@ def run_simulation(cfg: VoIPSimulationConfig) -> None:
 
     # Track variability manager for cleanup
     variability_manager: tp.Optional[NetworkVariabilityManager] = None
+    traffic_manager: tp.Optional[TrafficManager] = None
 
     try:
         net.start()
@@ -281,8 +277,22 @@ def run_simulation(cfg: VoIPSimulationConfig) -> None:
             polling_interval=cfg.simulation.polling_interval,
         )
 
+        # Initialize and start advanced traffic if enabled
+        if cfg.advanced_traffic.enabled:
+            traffic_manager = TrafficManager(
+                net=net,
+                config=cfg.advanced_traffic,
+                output_dir=output_dir,
+            )
+            traffic_manager.start(total_duration=cfg.simulation.duration)
+            logger.info("Advanced traffic generation enabled")
+            # Capture on all hosts if advanced traffic is enabled
+            capture_pairs = [(h, h) for h in net.hosts]
+        else:
+            capture_pairs = voip_pairs
+
         # Start all data collection (switch stats, interface stats, tcpdump)
-        collector.start_all(voip_pairs)
+        collector.start_all(capture_pairs)
 
         # Initialize and start network variability if enabled
         if cfg.variability.enabled:
@@ -295,40 +305,48 @@ def run_simulation(cfg: VoIPSimulationConfig) -> None:
             variability_manager.start()
             logger.info("Network variability simulation enabled")
 
-        # Start iperf servers
-        servers = start_iperf_servers(
-            voip_pairs,
-            output_dir,
-            cfg.simulation.polling_interval,
-        )
-        servers.extend(
-            start_background_servers(
-                bg_pairs,
+        clients = []
+        pings = []
+
+        if not cfg.advanced_traffic.enabled:
+            # Start iperf servers
+            servers = start_iperf_servers(
+                voip_pairs,
                 output_dir,
                 cfg.simulation.polling_interval,
             )
-        )
+            servers.extend(
+                start_background_servers(
+                    bg_pairs,
+                    output_dir,
+                    cfg.simulation.polling_interval,
+                )
+            )
 
-        logger.info("Starting traffic generation")
-        time.sleep(2)  # Wait for servers to start
+            logger.info("Starting traffic generation")
+            time.sleep(2)  # Wait for servers to start
 
-        # Start VoIP clients (bidirectional)
-        clients, pings = start_voip_clients(
-            voip_pairs,
-            output_dir,
-            cfg.simulation.duration,
-            cfg.traffic.voip_bandwidth,
-            cfg.simulation.polling_interval,
-        )
+            # Start VoIP clients (bidirectional)
+            clients, pings = start_voip_clients(
+                voip_pairs,
+                output_dir,
+                cfg.simulation.duration,
+                cfg.traffic.voip_bandwidth,
+                cfg.simulation.polling_interval,
+            )
 
-        # Start background traffic
-        bg_clients = start_background_clients(
-            bg_pairs,
-            output_dir,
-            cfg.simulation.duration,
-            cfg.simulation.polling_interval,
-        )
-        clients.extend(bg_clients)
+            # Start background traffic
+            bg_clients = start_background_clients(
+                bg_pairs,
+                output_dir,
+                cfg.simulation.duration,
+                cfg.simulation.polling_interval,
+            )
+            clients.extend(bg_clients)
+        else:
+            logger.info(
+                "Skipping basic iperf/ping traffic as advanced traffic is enabled"
+            )
 
         logger.info(f"Running simulation for {cfg.simulation.duration} seconds...")
 
@@ -343,6 +361,10 @@ def run_simulation(cfg: VoIPSimulationConfig) -> None:
         # Stop variability simulation if running
         if variability_manager is not None:
             variability_manager.stop()
+
+        # Stop advanced traffic if running
+        if traffic_manager is not None:
+            traffic_manager.stop()
 
         # Stop data collection
         collector.stop_all()
@@ -378,13 +400,6 @@ def _build_variability_config(cfg) -> VariabilityConfig:
     Returns:
         VariabilityConfig instance with all nested configurations
     """
-    from src.simulation.variability import (
-        BandwidthVariationConfig,
-        CongestionConfig,
-        DelayVariationConfig,
-        LinkFailureConfig,
-        PacketLossConfig,
-    )
 
     # Convert excluded_links and target_links to tuple format
     excluded = [tuple(link) for link in (cfg.excluded_links or [])]
@@ -450,8 +465,8 @@ def _build_variability_config(cfg) -> VariabilityConfig:
 
 @hydra.main(
     version_base="1.2",
-    config_path="../config",
-    config_name="simulation_with_variability",
+    config_path="../configs",
+    config_name="simulation",
 )
 def main(cfg: DictConfig) -> None:
     """Main entry point with Hydra configuration."""

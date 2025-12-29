@@ -65,6 +65,7 @@ from src.simulation.processor import (
     process_ping_logs,
     process_tcpdump_logs,
 )
+from src.simulation.traffic import TrafficManager, TrafficType
 from src.simulation.variability import (
     BandwidthVariationConfig,
     CongestionConfig,
