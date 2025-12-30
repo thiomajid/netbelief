@@ -37,5 +37,11 @@ class TrackioReporter(MetricsReporter):
     def log_learning_rate(self, lr, step):
         self.log_scalar("train/learning_rate", lr, step)
 
+    def log_gradients(self, grads, step):
+        return super().log_gradients(grads, step)
+
+    def log_histogram(self, tag, values, step):
+        return super().log_histogram(tag, values, step)
+
     def close(self):
         trackio.finish()
