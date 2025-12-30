@@ -80,6 +80,10 @@ class TrainingConfig:
         self.mesh_shape = tuple(self.mesh_shape)
         self.axis_names = tuple(self.axis_names)
         self.metrics = tuple(self.metrics)
+
+        if isinstance(self.trackio, dict):
+            self.trackio = TrackioArguments(**self.trackio)
+
         self.trackio.run_name = self.run_name
 
 
