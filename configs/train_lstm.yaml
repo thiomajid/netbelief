@@ -62,7 +62,7 @@ trainer:
   mesh_shape: [1, 8]
   axis_names: ["dp", "tp"]
 
-  report_to: "trackio"
+  report_to: "tensorboard"
   trackio:
     project: "airtel_lstm_forecaster"
     space_id: "thiomajid/airtel_metrics"
