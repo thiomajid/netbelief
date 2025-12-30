@@ -289,7 +289,7 @@ def main(cfg: DictConfig):
 
     # Set default warmup_ratio if not provided
     if not hasattr(args, "warmup_ratio"):
-        args.warmup_ratio = 0.2
+        args.warmup_ratio = 0.05
         logger.warning(
             f"warmup_ratio not found in config, defaulting to {args.warmup_ratio}"
         )
@@ -300,17 +300,29 @@ def main(cfg: DictConfig):
         f"Calculated warmup steps: {warmup_steps} ({args.warmup_ratio=}, max_optimizer_steps={max_optimizer_steps})"
     )
 
-    # Create warmup cosine learning rate schedule
-    cosine_schedule = optax.warmup_cosine_decay_schedule(
+    # linear warmup from 0 to peak learning rate
+    warmup_schedule = optax.linear_schedule(
         init_value=0.0,
-        peak_value=args.learning_rate,
-        warmup_steps=warmup_steps,
-        decay_steps=int(max_optimizer_steps - warmup_steps),
-        end_value=args.learning_rate * 0.2,
+        end_value=args.learning_rate,
+        transition_steps=warmup_steps,
+    )
+
+    # cosine decay from peak to end learning rate
+    decay_steps = max_optimizer_steps - warmup_steps
+    cosine_decay_schedule = optax.cosine_decay_schedule(
+        init_value=args.learning_rate,
+        decay_steps=decay_steps,
+        alpha=0.2,  # end_value = init_value * alpha
+    )
+
+    # join the schedules: linear warmup -> cosine decay
+    cosine_schedule = optax.join_schedules(
+        schedules=[warmup_schedule, cosine_decay_schedule],
+        boundaries=[warmup_steps],
     )
 
     logger.info(
-        f"Using warmup cosine learning rate schedule: 0.0 -> {args.learning_rate} -> {args.learning_rate * 0.2} over {max_optimizer_steps} optimizer steps (warmup: {warmup_steps} steps)"
+        f"Using linear warmup + cosine decay schedule: 0.0 -> {args.learning_rate} (linear, {warmup_steps} steps) -> {args.learning_rate * 0.2} (cosine, {decay_steps} steps)"
     )
 
     # Optimizer
@@ -361,7 +373,6 @@ def main(cfg: DictConfig):
     checkpoint_dir = Path(args.logging_dir).absolute()
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use evaluation reconstruction loss for best model selection
     checkpoint_options = ocp.CheckpointManagerOptions(
         best_mode="min",
         create=True,
