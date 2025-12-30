@@ -13,8 +13,8 @@ from PIL import Image
 from src.modules.lstm import LSTMForecaster
 from src.training.arguments import TrainingConfig
 from src.training.module import checkpoint_post_eval
+from src.training.reporter.base_reporter import MetricsReporter
 from src.training.state import TrainerState
-from src.training.tensorboard import TensorBoardLogger
 from src.utils.types import LoguruLogger
 from src.utils.viz import plot_forecast
 
@@ -102,7 +102,7 @@ class PlotForecastCallback(Callback):
         model: LSTMForecaster,
         series: jax.Array,
         targets: jax.Array,
-        reporter: TensorBoardLogger,
+        reporter: MetricsReporter,
     ):
         super().__init__()
         self.model = model

@@ -7,10 +7,11 @@ import numpy as np
 import optax
 from flax.metrics.tensorboard import SummaryWriter
 
+from src.training.reporter.base_reporter import MetricsReporter
 from src.utils.types import LoguruLogger
 
 
-class TensorBoardLogger:
+class TensorBoardReporter(MetricsReporter):
     def __init__(
         self, log_dir: tp.Union[str, Path], logger: LoguruLogger, name: str = "train"
     ):
@@ -18,16 +19,14 @@ class TensorBoardLogger:
 
         Args:
             log_dir: Directory to save TensorBoard logs
+            logger: Loguru logger instance
             name: Name for this logger instance
         """
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.name = name
+        super().__init__(log_dir, logger, name)
 
         # Create tensorboard writer
         self.writer = SummaryWriter(log_dir=str(self.log_dir / name))
 
-        self.logger = logger
         self.logger.info(f"TensorBoard logging initialized at {self.log_dir / name}")
 
     def log_scalar(

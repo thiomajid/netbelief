@@ -17,8 +17,8 @@ from tqdm.auto import tqdm
 from src.training.arguments import TrainingConfig, TrainingSteps
 from src.training.callback import Callback
 from src.training.module import count_parameters
+from src.training.reporter.base_reporter import MetricsReporter
 from src.training.state import TrainerState
-from src.training.tensorboard import TensorBoardLogger
 from src.utils.types import ForecasterInput, LoguruLogger
 
 _Batch = tuple[jax.Array, jax.Array]  # input_ids and labels
@@ -48,7 +48,7 @@ class Trainer:
         eval_dataloader: grain.DataLoader,
         train_metrics: nnx.Metric,
         eval_metrics: nnx.Metric,
-        reporter: TensorBoardLogger,
+        reporter: MetricsReporter,
         logger: LoguruLogger,
         steps_config: TrainingSteps,
         callbacks: tp.Optional[tuple[Callback]] = None,

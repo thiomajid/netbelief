@@ -1,10 +1,13 @@
 import sys
 
+from src.training.reporter.base_reporter import MetricsReporter
+from src.training.reporter.trackio_reporter import TrackioReporter
 from src.utils.types import ForecasterInput
 
 sys.path.append("../")
 
 
+import os
 import typing as tp
 from pathlib import Path
 from pprint import pprint
@@ -44,7 +47,7 @@ from src.training.module import (
     load_sharded_checkpoint_state,
     str2dtype,
 )
-from src.training.tensorboard import TensorBoardLogger
+from src.training.reporter.tensorboard_reporter import TensorBoardReporter
 from src.training.trainer import Trainer
 from src.utils.array import log_node_devices_stats
 
@@ -139,6 +142,8 @@ def main(cfg: DictConfig):
     # Load trainer arguments from YAML file
     args = parser.parse_dict(OmegaConf.to_container(cfg["trainer"], resolve=True))[0]  # ty: ignore
     args = tp.cast(TrainingConfig, args)
+
+    os.environ["HF_TOKEN"] = args.hub_token
 
     OUTPUT_DIR = Path(args.output_dir)
     if not OUTPUT_DIR.exists():
@@ -363,11 +368,19 @@ def main(cfg: DictConfig):
     )
 
     # TensorBoard logger
-    reporter = TensorBoardLogger(
-        log_dir=args.logging_dir,
-        logger=logger,
-        name=args.run_name,
-    )
+    reporter: MetricsReporter
+    if args.report_to == "tensorboard":
+        reporter = TensorBoardReporter(
+            log_dir=args.logging_dir,
+            logger=logger,
+            name=args.run_name,
+        )
+    else:
+        reporter = TrackioReporter(
+            log_dir=args.logging_dir,
+            logger=logger,
+            args=args,
+        )
 
     # Checkpoint manager
     checkpoint_dir = Path(args.logging_dir).absolute()

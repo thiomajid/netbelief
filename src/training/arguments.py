@@ -1,11 +1,25 @@
 import math
 from dataclasses import dataclass
+from typing import Literal, Optional
 
 from src.utils.types import LoguruLogger
+
+ReporterKind = Literal["tensorboard", "trackio"]
+
+
+@dataclass
+class TrackioArguments:
+    project: str
+    space_id: str
+    run_name: str
+    group: Optional[str] = None
 
 
 @dataclass
 class TrainingConfig:
+    report_to: ReporterKind
+    trackio: TrackioArguments
+
     # data stuff
     data_hub_id: str
     data_split: str
@@ -66,6 +80,7 @@ class TrainingConfig:
         self.mesh_shape = tuple(self.mesh_shape)
         self.axis_names = tuple(self.axis_names)
         self.metrics = tuple(self.metrics)
+        self.trackio.run_name = self.run_name
 
 
 @dataclass
