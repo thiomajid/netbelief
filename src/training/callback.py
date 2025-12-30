@@ -112,37 +112,39 @@ class PlotForecastCallback(Callback):
 
     def on_epoch_end(self, state: TrainerState, metrics: dict):
         output = self.model(self.series)
-        batch, devices, num_metrics, _ = output.point_predictions.shape
+        batch, num_devices, num_metrics, _ = output.point_predictions.shape
 
         batch_idx = random.randint(0, batch - 1)
-        device_idx = random.randint(0, devices - 1)
-        metric_idx = random.randint(0, num_metrics - 1)
 
-        context = self.series[batch_idx, device_idx, metric_idx, :]
-        predicted = output.point_predictions[batch_idx, device_idx, metric_idx, :]
-        gt_series = self.targets[batch_idx, device_idx, metric_idx, :]
+        for device_idx in range(num_devices):
+            for metric_idx in range(num_metrics):
+                context = self.series[batch_idx, device_idx, metric_idx, :]
+                predicted = output.point_predictions[
+                    batch_idx, device_idx, metric_idx, :
+                ]
+                gt_series = self.targets[batch_idx, device_idx, metric_idx, :]
 
-        fig, ax = plt.subplots(figsize=(12, 6))
-        plot_forecast(
-            context=context,
-            forecasts=predicted,
-            ground_truth=gt_series,
-            ax=ax,
-            title=f"Forecast - Device {device_idx}, Metric {metric_idx}",
-        )
+                fig, ax = plt.subplots(figsize=(12, 6))
+                plot_forecast(
+                    context=context,
+                    forecasts=predicted,
+                    ground_truth=gt_series,
+                    ax=ax,
+                    title=f"Forecast - Device {device_idx}, Metric {metric_idx}",
+                )
 
-        with io.BytesIO() as buffer:
-            fig.savefig(buffer, format="png", bbox_inches="tight")
-            buffer.seek(0)
-            img = np.array(Image.open(buffer).convert("RGB"))
+                with io.BytesIO() as buffer:
+                    fig.savefig(buffer, format="png", bbox_inches="tight")
+                    buffer.seek(0)
+                    img = np.array(Image.open(buffer).convert("RGB"))
 
-            self.reporter.log_figure(
-                tag=f"Device_{device_idx}/Metric_{metric_idx}",
-                figure=img,
-                step=state.current_step,
-            )
+                    self.reporter.log_figure(
+                        tag=f"Device_{device_idx}/Metric_{metric_idx}-Batch_{batch_idx}",
+                        figure=img,
+                        step=state.current_step,
+                    )
 
-        plt.close(fig)
+                plt.close(fig)
 
-        del fig
-        del ax
+                del fig
+                del ax
