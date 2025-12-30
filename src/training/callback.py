@@ -3,9 +3,9 @@ import random
 from pathlib import Path
 
 import jax
+import matplotlib.pyplot as plt
 import numpy as np
 import orbax.checkpoint as ocp
-import plotly.graph_objects as go
 from flax import nnx
 from huggingface_hub import create_repo, repo_exists, upload_folder
 from PIL import Image
@@ -124,19 +124,18 @@ class PlotForecastCallback(Callback):
                 ]
                 gt_series = self.targets[batch_idx, device_idx, metric_idx, :]
 
-                fig = go.Figure()
+                fig, ax = plt.subplots(figsize=(12, 6))
                 plot_forecast(
                     context=context,
                     forecasts=predicted,
                     ground_truth=gt_series,
-                    fig=fig,
+                    ax=ax,
                     title=f"Forecast - Device {device_idx}, Metric {metric_idx}",
                 )
 
-                # Convert to high-quality PNG using same parameters as write_image
-                img_bytes = fig.to_image(format="png", width=1400, height=800, scale=3)
-
-                with io.BytesIO(img_bytes) as buffer:
+                with io.BytesIO() as buffer:
+                    fig.savefig(buffer, format="png", bbox_inches="tight")
+                    buffer.seek(0)
                     img = np.array(Image.open(buffer).convert("RGB"))
 
                     self.reporter.log_figure(
@@ -145,4 +144,7 @@ class PlotForecastCallback(Callback):
                         step=state.current_step,
                     )
 
+                plt.close(fig)
+
                 del fig
+                del ax

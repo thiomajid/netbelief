@@ -1,9 +1,8 @@
 import typing as tp
 
 import jax
+import matplotlib.pyplot as plt
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 
 COLOR_CONTEXT = "#2E86AB"
 COLOR_FORECAST = "#E63946"
@@ -18,23 +17,11 @@ def plot_forecast(
     quantile_forecasts: jax.Array | np.ndarray | None = None,
     quantiles: tp.Iterable[float] | None = None,
     ground_truth: jax.Array | np.ndarray | None = None,
-    fig: go.Figure | None = None,
+    ax=None,
     title: str | None = None,
 ):
-    """
-    Plots time series forecast using Plotly.
-
-    Args:
-        context: Historical data points.
-        forecasts: Point forecasts.
-        quantile_forecasts: Quantile forecasts (num_quantiles, forecast_len).
-        quantiles: List of quantile values.
-        ground_truth: Actual values for the forecast period.
-        fig: Existing Plotly figure to add to.
-        title: Plot title.
-    """
-    if fig is None:
-        fig = go.Figure()
+    if ax is None:
+        ax = plt.gca()
 
     context = np.asarray(jax.device_get(context))
     if forecasts is not None:
@@ -46,27 +33,25 @@ def plot_forecast(
 
     context_len = len(context)
     context_indices = np.arange(context_len)
-
-    # Plot Context
-    fig.add_trace(
-        go.Scatter(
-            x=context_indices,
-            y=context,
-            mode="lines+markers",
-            name="Context",
-            line=dict(color=COLOR_CONTEXT, width=2.5),
-            marker=dict(size=4),
-        )
+    ax.plot(
+        context_indices,
+        context,
+        color=COLOR_CONTEXT,
+        label="Context",
+        linewidth=2.5,
+        marker="o",
+        markersize=4,
+        markevery=2,
     )
 
-    # Draw cutoff line
-    fig.add_vline(
+    # draw cutoff line at the last context point
+    ax.axvline(
         x=context_len - 1,
-        line_width=2,
-        line_dash="dot",
-        line_color=COLOR_CUTOFF_LINE,
-        annotation_text="Forecast Start",
-        annotation_position="top left",
+        color=COLOR_CUTOFF_LINE,
+        linestyle=":",
+        linewidth=2,
+        alpha=0.7,
+        label="Forecast Start",
     )
 
     forecast_indices = None
@@ -74,20 +59,23 @@ def plot_forecast(
 
     if forecasts is not None:
         forecast_len = len(forecasts)
+        # start forecast indices from the last context point for continuity
+        # add 1 to length to include the bridge point
         forecast_indices = np.arange(
             context_len - 1, context_len - 1 + forecast_len + 1
         )
-        forecast_with_bridge = np.concatenate([[context[-1]], forecasts])
 
-        fig.add_trace(
-            go.Scatter(
-                x=forecast_indices,
-                y=forecast_with_bridge,
-                mode="lines+markers",
-                name="Forecast (Point)",
-                line=dict(color=COLOR_FORECAST, width=3),
-                marker=dict(symbol="square", size=5),
-            )
+        # create extended forecast array starting with last context value
+        forecast_with_bridge = np.concatenate([[context[-1]], forecasts])
+        ax.plot(
+            forecast_indices,
+            forecast_with_bridge,
+            color=COLOR_FORECAST,
+            label="Forecast (Point)",
+            linewidth=3,
+            marker="s",
+            markersize=5,
+            markevery=1,
         )
 
     if quantile_forecasts is not None:
@@ -96,42 +84,43 @@ def plot_forecast(
             forecast_indices = np.arange(context_len - 1, context_len - 1 + q_len + 1)
 
         num_q = quantile_forecasts.shape[0]
-        colors = px.colors.qualitative.Plotly
+        cmap = plt.get_cmap("tab10")
+
+        # Different line styles for better distinction
+        line_styles = ["-", "--", "-.", ":"]
+        markers = ["v", "^", "<", ">", "d", "p", "*", "h"]
 
         for i in range(num_q):
             q_val = quantile_forecasts[i]
             q_with_bridge = np.concatenate([[context[-1]], q_val])
+
             q_label = (
                 f"Q-{list(quantiles)[i]}" if quantiles is not None else f"Q-idx{i}"
             )
-            color = colors[i % len(colors)]
+            color = cmap(i % 10)
+            linestyle = line_styles[i % len(line_styles)]
+            marker = markers[i % len(markers)]
 
-            fig.add_trace(
-                go.Scatter(
-                    x=forecast_indices,
-                    y=q_with_bridge,
-                    mode="lines+markers",
-                    name=q_label,
-                    line=dict(color=color, width=2, dash="dash"),
-                    marker=dict(size=4),
-                    opacity=0.8,
-                )
+            ax.plot(
+                forecast_indices,
+                q_with_bridge,
+                color=color,
+                label=q_label,
+                linewidth=2,
+                alpha=0.8,
+                linestyle=linestyle,
+                marker=marker,
+                markersize=4,
+                markevery=2,
             )
 
             if forecast_with_bridge is not None:
-                # Fill between forecast and quantile
-                fig.add_trace(
-                    go.Scatter(
-                        x=np.concatenate([forecast_indices, forecast_indices[::-1]]),
-                        y=np.concatenate([forecast_with_bridge, q_with_bridge[::-1]]),
-                        fill="toself",
-                        fillcolor=color,
-                        opacity=0.15,
-                        line=dict(color="rgba(255,255,255,0)"),
-                        hoverinfo="skip",
-                        showlegend=False,
-                        name=f"Area {q_label}",
-                    )
+                ax.fill_between(
+                    forecast_indices,
+                    forecast_with_bridge,
+                    q_with_bridge,
+                    color=color,
+                    alpha=0.15,
                 )
 
     if ground_truth is not None:
@@ -144,50 +133,42 @@ def plot_forecast(
 
         ground_truth_len = min(len(ground_truth), len(target_indices) - 1)
         ground_truth_indices = target_indices[: ground_truth_len + 1]
+
+        # create extended ground truth array starting with last context value
         ground_truth_with_bridge = np.concatenate(
             [[context[-1]], ground_truth[:ground_truth_len]]
         )
 
-        fig.add_trace(
-            go.Scatter(
-                x=ground_truth_indices,
-                y=ground_truth_with_bridge,
-                mode="lines+markers",
-                name="Ground Truth",
-                line=dict(color=COLOR_GROUND_TRUTH, width=3),
-                marker=dict(symbol="diamond", size=5),
-                opacity=0.9,
-            )
+        ax.plot(
+            ground_truth_indices,
+            ground_truth_with_bridge,
+            color=COLOR_GROUND_TRUTH,
+            label="Ground Truth",
+            linewidth=3,
+            linestyle="-",
+            alpha=0.9,
+            marker="D",
+            markersize=5,
+            markevery=1,
         )
 
+        # highlight prediction error area using fill_between if point forecast exists
         if forecast_with_bridge is not None:
-            # Prediction Error Area
-            y_upper = forecast_with_bridge[: ground_truth_len + 1]
-            y_lower = ground_truth_with_bridge
-
-            fig.add_trace(
-                go.Scatter(
-                    x=np.concatenate(
-                        [ground_truth_indices, ground_truth_indices[::-1]]
-                    ),
-                    y=np.concatenate([y_upper, y_lower[::-1]]),
-                    fill="toself",
-                    fillcolor=COLOR_ERROR,
-                    opacity=0.25,
-                    line=dict(color="rgba(255,255,255,0)"),
-                    hoverinfo="skip",
-                    showlegend=True,
-                    name="Prediction Error",
-                )
+            ax.fill_between(
+                ground_truth_indices,
+                forecast_with_bridge[: ground_truth_len + 1],
+                ground_truth_with_bridge,
+                color=COLOR_ERROR,
+                alpha=0.25,
+                label="Prediction Error",
             )
 
-    fig.update_layout(
-        title=title if title else "",
-        xaxis_title="Time Step",
-        yaxis_title="Value",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        template="plotly_white",
-        hovermode="x unified",
-    )
+    ax.set_xlabel("Time Step", fontsize=11, fontweight="bold")
+    ax.set_ylabel("Value", fontsize=11, fontweight="bold")
+    ax.legend(loc="best", framealpha=0.9, fontsize=9, ncol=2)
+    ax.grid(True, alpha=0.25, linestyle="--", linewidth=0.5)
 
-    return fig
+    if title:
+        ax.set_title(title, fontsize=13, fontweight="bold", pad=15)
+
+    return ax
