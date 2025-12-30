@@ -1,0 +1,97 @@
+# Realistic Network Simulation Configuration
+# This configuration drives human-like traffic generation for
+# time series forecasting data collection.
+
+topology:
+  module_name: airtel
+  class_name: GeneratedTopo
+
+simulation:
+  duration: 3600 # 1 hour simulation
+  polling_interval: 0.5 # Data collection interval in seconds
+  output_dir: dumps
+  stp_convergence_time: 15
+  seed: 42 # Random seed for reproducibility
+  link_capacity_bps: 10000000 # 10 Mbps link capacity
+
+# Realistic traffic generation settings
+realistic_traffic:
+  enabled: true
+  server_host: "h0" # Host that runs infrastructure servers
+
+  # User profile distribution (weights for random assignment)
+  profile_weights:
+    casual: 0.35
+    power: 0.20
+    gamer: 0.15
+    office: 0.25
+    iot: 0.05
+
+  # Background traffic to ensure network load
+  background_traffic:
+    enabled: true
+    min_flows: 2
+    max_flows: 5
+
+# Network variability for realistic conditions
+variability:
+  enabled: true
+  seed: 42
+  link_scope: "all"
+  excluded_links: []
+  target_links: []
+
+  default_bandwidth: 10.0 # Mbps
+  default_delay: "1ms"
+
+  # Link failures: rare but impactful
+  link_failure:
+    enabled: true
+    probability: 0.2
+    min_interval: 300.0
+    max_interval: 900.0
+    min_duration: 15.0
+    max_duration: 60.0
+    max_concurrent_failures: 0.1
+
+  # Delay variations: gradual changes
+  delay_variation:
+    enabled: true
+    probability: 0.3
+    min_interval: 120.0
+    max_interval: 300.0
+    min_multiplier: 0.9
+    max_multiplier: 1.5
+    revert_after: 180.0
+
+  # Bandwidth variations
+  bandwidth_variation:
+    enabled: true
+    probability: 0.4
+    min_interval: 180.0
+    max_interval: 600.0
+    min_fraction: 0.6
+    max_fraction: 1.0
+    revert_after: 240.0
+
+  # Packet loss events
+  packet_loss:
+    enabled: true
+    probability: 0.2
+    min_interval: 180.0
+    max_interval: 600.0
+    min_loss: 0.0
+    max_loss: 3.0
+    revert_after: 90.0
+
+  # Congestion events
+  congestion:
+    enabled: true
+    probability: 0.25
+    min_interval: 600.0
+    max_interval: 1800.0
+    min_duration: 60.0
+    max_duration: 180.0
+    bandwidth_reduction: 0.4
+    additional_delay_ms: 25.0
+    loss_percent: 1.0

@@ -196,3 +196,47 @@ class VoIPSimulationConfig:
     )
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     variability: VariabilityConfig = field(default_factory=VariabilityConfig)
+
+
+@dataclass
+class ProfileWeightsConfig:
+    """Weights for user profile distribution."""
+
+    casual: float = 0.35
+    power: float = 0.20
+    gamer: float = 0.15
+    office: float = 0.25
+    iot: float = 0.05
+
+
+@dataclass
+class BackgroundTrafficConfig:
+    """Configuration for background traffic generation."""
+
+    enabled: bool = True
+    min_flows: int = 2
+    max_flows: int = 5
+
+
+@dataclass
+class RealisticTrafficConfig:
+    """Configuration for realistic traffic generation."""
+
+    enabled: bool = True
+    server_host: str = "h0"
+    profile_weights: ProfileWeightsConfig = field(default_factory=ProfileWeightsConfig)
+    background_traffic: BackgroundTrafficConfig = field(
+        default_factory=BackgroundTrafficConfig
+    )
+
+
+@dataclass
+class RealisticSimulationConfig:
+    """Root configuration for realistic network simulation."""
+
+    topology: TopologyConfig = field(default_factory=TopologyConfig)
+    simulation: SimulationConfig = field(default_factory=SimulationConfig)
+    realistic_traffic: RealisticTrafficConfig = field(
+        default_factory=RealisticTrafficConfig
+    )
+    variability: VariabilityConfig = field(default_factory=VariabilityConfig)

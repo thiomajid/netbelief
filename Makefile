@@ -54,6 +54,25 @@ graph2py:
 run-topology:
 	@sudo mn --custom $(topo) --topo generated --link=TCLink --controller=remote
 
+# Run realistic network simulation with human-like traffic patterns
+run-realistic-simulation:
+	@echo "Running realistic network simulation..."
+	@sudo $(shell uv run which python) scripts/realistic_simulation.py
+
+# Run realistic simulation with custom duration (in seconds)
+run-realistic-simulation-duration:
+	@echo "Running realistic simulation for $(duration) seconds..."
+	@sudo $(shell uv run which python) scripts/realistic_simulation.py simulation.duration=$(duration)
+
+# Run realistic simulation with custom configuration
+run-realistic-simulation-custom:
+	@echo "Running realistic simulation with custom config..."
+	@sudo $(shell uv run which python) scripts/realistic_simulation.py $(args)
+
+# Run the original VoIP simulation
+run-voip-simulation:
+	@echo "Running VoIP network simulation..."
+	@sudo $(shell uv run which python) scripts/voip_simulation.py
 
 # terminates all processes related to Mininet to allow running further simulations
 clear-mininet:
