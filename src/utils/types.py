@@ -13,6 +13,13 @@ AttentionImpl = tp.Literal["xla", "cudnn"]
 
 
 @struct.dataclass
+class RevINNormOutput:
+    mean: jax.Array
+    inverse_std: jax.Array
+    normalized: jax.Array
+
+
+@struct.dataclass
 class EncodedBelief:
     belief: jax.Array
     rnn_hidden_seq: jax.Array

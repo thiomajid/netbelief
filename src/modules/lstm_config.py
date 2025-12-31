@@ -24,6 +24,17 @@ class LSTMForecasterConfig:
         self.quantiles = tuple(self.quantiles)
 
 
+@dataclass
+class PatchLSTMConfig(LSTMForecasterConfig):
+    patch_size: int = 16
+    stride: int = 8
+    pad_mode: str = "edge"
+    pooling_mode: str = "last"
+
+    def __post_init__(self):
+        super().__post_init__()
+
+
 @dataclass(unsafe_hash=True, eq=True)
 class LSTMForecasterShardings:
     proj_conv_kernel: ShardingRule = (None, None, "tp")
