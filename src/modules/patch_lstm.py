@@ -160,7 +160,7 @@ class PatchLSTMBlock(nnx.Module):
             self.mixer = nnx.data(None)
 
         self.down_proj = nnx.Linear(
-            in_features=in_features,
+            in_features=intermediate_features,
             out_features=in_features,
             use_bias=config.head_bias,
             rngs=rngs,

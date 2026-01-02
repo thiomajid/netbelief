@@ -20,7 +20,7 @@ class RevIN(nnx.Module):
         param_dtype=jnp.float32,
         scale_init=initializers.ones_init(),
         bias_init=initializers.zeros_init(),
-        reduction_axis: Axes = 1,
+        reduction_axis: Axes = -1,
         axis_index_groups: tp.Any = None,
         epsilon: float = 1e-5,
     ):
@@ -37,8 +37,18 @@ class RevIN(nnx.Module):
         self.bias = nnx.Param(bias_init(rngs.params(), feature_shape, param_dtype))
 
     def normalize(self, x: jax.Array):
+        """
+        Normalizes the input array across the time dimension
+
+        Args:
+            x (jax.Array) of shape (batch, num_devices, num_metrics, timesteps)
+        """
         scale = self.scale[...]
         bias = self.bias[...]
+
+        # expand to (1, 1, num_metrics, 1) to broadcast across batch, devices, and time
+        scale = scale.reshape(1, 1, -1, 1)
+        bias = bias.reshape(1, 1, -1, 1)
         x, scale, bias = self.promote_dtype((x, scale, bias), dtype=self.dtype)
 
         mean = jnp.mean(x, axis=self.reduction_axis, keepdims=True)
@@ -62,6 +72,10 @@ class RevIN(nnx.Module):
 
         scale, bias = self.scale.value, self.bias.value
         x, scale, bias = self.promote_dtype((x, scale, bias), dtype=self.dtype)
+
+        # Same reshape as normalize
+        scale = scale.reshape(1, 1, -1, 1)
+        bias = bias.reshape(1, 1, -1, 1)
 
         x = (x - bias) / scale
         std = 1 / output.inverse_std
