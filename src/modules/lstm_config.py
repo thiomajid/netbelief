@@ -19,6 +19,7 @@ class LSTMForecasterConfig:
     attention_impl: str = "xla"
     conv_kernel_size: int = 3
     conv_bias: bool = False
+    use_revin: bool = False
 
     def __post_init__(self):
         self.quantiles = tuple(self.quantiles)

@@ -84,6 +84,7 @@ model:
   attention_impl: "xla"
   conv_kernel_size: 3
   conv_bias: false
+  use_revin: false
 
 shardings:
   proj_conv_kernel: [null, null, "tp"]

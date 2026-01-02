@@ -259,10 +259,11 @@ def main(cfg: DictConfig):
         DeviceMaskingTransform(mask_prob=0.0),  # no masking
     ]
 
-    train_loader, eval_loader, feature_scaler, target_scaler = create_lstm_dataloaders(
+    train_loader, eval_loader, data_scaler = create_lstm_dataloaders(
         data=data,
         lookback=args.lookback,
         horizon=args.horizon,
+        use_revin=model_config.use_revin,
         train_fraction=args.train_fraction,
         seed=args.seed,
         worker_count=args.worker_count,
@@ -273,8 +274,7 @@ def main(cfg: DictConfig):
     )
 
     # save scalers for later usage
-    feature_scaler.save(OUTPUT_DIR / "feature_scaler.json")
-    target_scaler.save(OUTPUT_DIR / "target_scaler.json")
+    data_scaler.save(OUTPUT_DIR / "data_scaler.json")
     logger.info(f"Saved scalers params in the output directory at {OUTPUT_DIR}")
 
     # Setup the training loop

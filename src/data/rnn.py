@@ -87,7 +87,6 @@ def convert_dataframe_to_numpy(
 
     min_real_length = min(real_data_lengths)
     num_devices = len(device_arrays)
-    num_metrics = len(metrics)
 
     logger.info(f"Total devices: {num_devices}")
     logger.warning(
@@ -158,23 +157,36 @@ def create_lstm_dataloaders(
     seed: int,
     worker_count: int,
     worker_buffer_size: int,
+    use_revin: bool = False,
     drop_remainder: bool = True,
     train_operations: tp.Optional[tp.Sequence[grain.Transformation]] = None,
     eval_operations: tp.Optional[tp.Sequence[grain.Transformation]] = None,
 ):
-    context, target = partition_logs(data, lookback=lookback, horizon=horizon)
-    split_index = int(context.shape[0] * train_fraction)
-    train_context, train_target = context[:split_index], target[:split_index]
-    test_context, test_target = context[split_index:], target[split_index:]
+    # data shape: (num_devices, num_metrics, total_timesteps)
+    num_devices, num_metrics, total_timesteps = data.shape
+    split_idx = int(total_timesteps * train_fraction)
 
-    feature_scaler = MultiDimStandardScaler(axis=(0, 3))
-    target_scaler = MultiDimStandardScaler(axis=(0, 3))
+    if split_idx + lookback + horizon > total_timesteps:
+        raise ValueError(
+            "Train fraction is too large, not enough data for test window."
+        )
 
-    train_context_scaled = feature_scaler.fit_transform(train_context)
-    train_target_scaled = target_scaler.fit_transform(train_target)
+    train_data = data[:, :, :split_idx]
+    test_data = data[:, :, split_idx:]
 
-    test_context_scaled = feature_scaler.transform(test_context)
-    test_target_scaled = target_scaler.transform(test_target)
+    # use axis=(0, 2) to scale per metric across all devices and time
+    data_scaler = MultiDimStandardScaler(axis=(0, 2))
+    if not use_revin:
+        train_data = data_scaler.fit_transform(train_data)
+        test_data = data_scaler.transform(test_data)
+
+    train_context, train_target = partition_logs(
+        train_data, lookback=lookback, horizon=horizon
+    )
+
+    test_context, test_target = partition_logs(
+        test_data, lookback=lookback, horizon=horizon
+    )
 
     train_source = MetricsDataSource(train_context, train_target)
     val_source = MetricsDataSource(test_context, test_target)
@@ -207,4 +219,4 @@ def create_lstm_dataloaders(
         ),
     )
 
-    return train_loader, val_loader, feature_scaler, target_scaler
+    return train_loader, val_loader, data_scaler
