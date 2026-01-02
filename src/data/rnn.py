@@ -176,8 +176,8 @@ def create_lstm_dataloaders(
     test_context_scaled = feature_scaler.transform(test_context)
     test_target_scaled = target_scaler.transform(test_target)
 
-    train_source = MetricsDataSource(train_context_scaled, train_target_scaled)
-    val_source = MetricsDataSource(test_context_scaled, test_target_scaled)
+    train_source = MetricsDataSource(train_context, train_target)
+    val_source = MetricsDataSource(test_context, test_target)
 
     train_loader = grain.DataLoader(
         data_source=train_source,
