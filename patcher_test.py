@@ -19,6 +19,8 @@ if __name__ == "__main__":
         horizon=10,
         num_heads=4,
         use_device_mixer=True,
+        patch_size=16,
+        stride=16,
     )
 
     shardings = LSTMForecasterShardings()
