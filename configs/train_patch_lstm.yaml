@@ -1,0 +1,106 @@
+trainer:
+  # Data configuration
+  data_hub_id: "thiomajid/airtel-mininet-simulation"
+  data_split: "train"
+  lookback: 50
+  horizon: 10
+  train_fraction: 0.8
+  worker_count: 4
+  worker_buffer_size: 2
+  drop_remainder: 1
+  batch_size: 32
+  mask_prob: 0.15
+
+  # Model precision
+  dtype: "bf16"
+  param_dtype: "fp32"
+
+  # Training configuration
+  metrics:
+    [
+      "bandwidth_bps",
+      "jitter_ms",
+      "rtt_ms",
+      "mos",
+      "link_utilization_percent",
+      "packets_per_second",
+      "congestion_score",
+      "one_way_delay_ms",
+      "net_tx_pkts",
+      "net_tx_bytes",
+    ]
+  num_epochs: 100
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 16
+  gradient_accumulation_steps: 4
+
+  # Optimization
+  point_weight: 0.6
+  seed: 42
+  learning_rate: 1e-3
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+
+  # Logging and checkpointing
+  logging_steps: 50
+  output_dir: "outputs/lstm_forecaster"
+  logging_dir: "outputs/lstm_forecaster/logs"
+  run_name: "lstm_forecaster_run"
+  best_metric_key: "loss"
+  best_n_to_keep: 3
+
+  # Hub configuration
+  hub_model_id: "thiomajid/lstm-forecaster"
+  hub_token: ""
+  hub_private_repo: true
+  upload_message: "Training checkpoint"
+
+  # Distributed training
+  mesh_shape: [1, 8]
+  axis_names: ["dp", "tp"]
+
+  report_to: "tensorboard"
+  trackio:
+    project: "airtel_lstm_forecaster"
+    space_id: "thiomajid/airtel_metrics"
+    run_name: "lstm_forecaster_run"
+    group: null
+
+model:
+  num_metrics: 10
+  hidden_features: 512
+  num_heads: 8
+  num_kv_heads: 4
+  horizon: 10
+  head_bias: false
+  normalize_qk: true
+  use_device_mixer: true
+  num_blocks: 3
+  bidirectional: false
+  quantiles: [0.1, 0.5, 0.9, 0.95]
+  attention_impl: "xla"
+  conv_kernel_size: 3
+  conv_bias: false
+  use_revin: false
+
+shardings:
+  proj_conv_kernel: [null, null, "tp"]
+  proj_conv_bias: ["tp"]
+  norm: ["tp"]
+  lstm_input_kernel: [null, "tp"]
+  lstm_recurrent_kernel: [null, "tp"]
+  lstm_bias: ["tp"]
+  attn_qkv: [null, "tp"]
+  attn_output: ["tp", null]
+  attn_norm: ["tp"]
+  head_kernel: ["tp", null]
+  head_bias: [null]
+
+# Checkpoint configuration (optional)
+resume_from_checkpoint: false
+checkpoint_hub_url: ""
+checkpoint_save_dir: "outputs/lstm_forecaster/checkpoints"
+checkpoint_revision: "main"

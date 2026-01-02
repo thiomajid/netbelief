@@ -131,11 +131,11 @@ def eval_step(
 
 @hydra.main(
     config_path="../configs",
-    config_name="train_lstm",
+    config_name="train_patch_lstm",
     version_base="1.2",
 )
 def main(cfg: DictConfig):
-    logger.info("Starting LSTM training...")
+    logger.info("Starting PatchLSTM training...")
 
     parser = HfArgumentParser(TrainingConfig)
 
@@ -154,7 +154,7 @@ def main(cfg: DictConfig):
     dtype = str2dtype(args.dtype)
     param_dtype = str2dtype(args.param_dtype)
     logger.info(
-        f"Creating LSTM model with dtype={dtype} and param_dtype={param_dtype}..."
+        f"Creating PatchLSTM model with dtype={dtype} and param_dtype={param_dtype}..."
     )
 
     mesh_shape = tuple(args.mesh_shape)
@@ -271,10 +271,12 @@ def main(cfg: DictConfig):
         drop_remainder=args.drop_remainder,
         train_operations=train_transforms,
         eval_operations=eval_transforms,
+        logger=logger,
     )
 
     # save scalers for later usage
-    data_scaler.save(OUTPUT_DIR / "data_scaler.json")
+    if data_scaler.is_fitted_:
+        data_scaler.save(OUTPUT_DIR / "data_scaler.json")
     logger.info(f"Saved scalers params in the output directory at {OUTPUT_DIR}")
 
     # Setup the training loop

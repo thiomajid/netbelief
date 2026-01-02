@@ -271,10 +271,12 @@ def main(cfg: DictConfig):
         drop_remainder=args.drop_remainder,
         train_operations=train_transforms,
         eval_operations=eval_transforms,
+        logger=logger,
     )
 
     # save scalers for later usage
-    data_scaler.save(OUTPUT_DIR / "data_scaler.json")
+    if data_scaler.is_fitted_:
+        data_scaler.save(OUTPUT_DIR / "data_scaler.json")
     logger.info(f"Saved scalers params in the output directory at {OUTPUT_DIR}")
 
     # Setup the training loop

@@ -157,6 +157,7 @@ def create_lstm_dataloaders(
     seed: int,
     worker_count: int,
     worker_buffer_size: int,
+    logger: LoguruLogger,
     use_revin: bool = False,
     drop_remainder: bool = True,
     train_operations: tp.Optional[tp.Sequence[grain.Transformation]] = None,
@@ -177,6 +178,9 @@ def create_lstm_dataloaders(
     # use axis=(0, 2) to scale per metric across all devices and time
     data_scaler = MultiDimStandardScaler(axis=(0, 2))
     if not use_revin:
+        logger.warning(
+            "Scaling the data with standard scalar because RevIN is not used"
+        )
         train_data = data_scaler.fit_transform(train_data)
         test_data = data_scaler.transform(test_data)
 
